@@ -12,6 +12,5 @@
     "test": "node --test",
     "check": "node --check spike/mock-proxy.mjs && node --test"
   },
-  "homepage": "https://keyless.aahmedhussa.in",
   "author": "Ahmad Hussain"
 }

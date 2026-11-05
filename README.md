@@ -80,11 +80,9 @@ Follow [`docs/spike-runbook.md`](docs/spike-runbook.md), then record what actual
 
 No encrypted vault, credential storage, grant system, human approval, daemon, production network client, or real upstream forwarding is included in this spike. Those come after the workflow is validated and the protocol is written from what we learn.
 
+## Support
 
-## Website and support
-
-- Website: [keyless.aahmedhussa.in](https://keyless.aahmedhussa.in)
-- Support: [keyless@aahmedhussa.in](mailto:keyless@aahmedhussa.in)
+For project support, email [contact@aahmedhussa.in](mailto:contact@aahmedhussa.in).
 
 ## Project notes
 
