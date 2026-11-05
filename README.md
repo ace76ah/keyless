@@ -12,7 +12,7 @@ There is an important limit to that promise: a process running as the same opera
 
 **Status: Gate 0 — protocol contract.**
 
-Gate -1 has passed for the tested compatibility targets. The local mock's path-based base-URL routing was validated by the owner with:
+Gate -1 is complete. The local mock's path-based base-URL routing was validated by the owner with:
 
 - **OpenAI Node SDK v4** — custom `baseURL` worked and the SDK accepted the canned response.
 - **Anthropic Node SDK** — custom `baseURL` worked and the SDK accepted the canned response.
@@ -24,9 +24,19 @@ The selected alias format is the URL path prefix:
 http://127.0.0.1:<port>/c/<alias>/...
 ```
 
-The Cursor IDE Free-tier test in the owner's setup blocked custom OpenAI base URLs. The owner's report identifies a Pro tier or a CLI agent such as Aider as the workaround; this does not establish behavior for every Cursor plan or version. Claude Code has not been tested.
+See [the spike notes](docs/spike-notes.md) for the tested versions, the Cursor findings and the remaining limitations.
 
-These tests validate base-URL routing and mock response compatibility. They do **not** validate the production Keyless project-token header, credential injection, vault behavior, or production security. See [the spike notes](docs/spike-notes.md) for the full scorecard and limitations.
+## V1 integration scope
+
+Keyless v1 targets **direct SDK integrations** and **CLI coding agents** that can be configured to use a custom API base URL. OpenAI Node SDK, Anthropic Node SDK and Aider have passed the mock compatibility test. Claude Code and other CLI agents remain untested.
+
+IDE-hosted agent interception is out of scope for v1. In the owner's Cursor Free-tier test, the custom OpenAI API toggle could be enabled, but requests returned a **Cursor Subscription Required** paywall error. When a built-in Cursor model such as Grok or Composer was selected, the request bypassed the custom base URL and went through Cursor's own cloud service instead. This is the observed behavior in the tested setup, not a claim about every plan or IDE.
+
+GitHub Copilot is also outside the v1 integration scope; it was not tested in this spike. System-level packet interception is a non-goal. Keyless will not attempt to capture or reroute traffic from IDEs that do not expose a supported custom endpoint.
+
+These tests validate base-URL routing and mock response compatibility. They do **not** validate the production Keyless project-token header, credential injection, vault behavior, or production security.
+
+## The mock
 
 The mock server remains deliberately small. It:
 
@@ -37,7 +47,7 @@ The mock server remains deliberately small. It:
 - does not store, decrypt, attach, or forward credentials;
 - does not make requests to OpenAI, Anthropic, or any other upstream service.
 
-**Do not put a real API key in this spike.** The sample SDK scripts use an obviously fake placeholder. The mock ignores it.
+**Do not put a real API key in this spike.** The sample SDK scripts use obviously fake placeholders. The mock ignores them.
 
 ## Run it
 
@@ -85,18 +95,13 @@ npm run check
 
 ## Gate 0: protocol contract
 
-The next step is to define the stable contract used by the CLI, local service, SDKs and agents. The Gate 0 draft is in [`docs/protocol.md`](docs/protocol.md). Project-token authentication and exact SDK header behavior remain to be validated; the Gate -1 dummy-key tests did not cover those details.
-
-The two workflows remain distinct:
-
-1. **App/tool mode:** Cursor or Claude Code helps build an application, and code running locally in that project calls the Keyless endpoint.
-2. **Agent-inference mode:** a local coding agent that supports a custom API base URL sends its own model requests through the endpoint. Aider has passed this path in the owner-run test. Other agents must be tested individually.
-
-See the [Gate -1 runbook](docs/spike-runbook.md), [spike notes](docs/spike-notes.md) and [current decisions](DECISIONS.md).
+The Gate 0 draft is in [`docs/protocol.md`](docs/protocol.md). It defines the proposed path-based routes, project-token header, error format, streaming behavior and `keyless use` instructions. Project-token authentication and exact SDK header behavior remain to be validated; the Gate -1 dummy-key tests did not cover those details.
 
 ## What is not built yet
 
-No encrypted vault, credential storage, grant system, human approval, daemon, production network client, or real upstream forwarding is included in this spike. Those are Gate 0/implementation work, not features of the current mock.
+No encrypted vault, credential storage, grant system, human approval, daemon, production network client, or real upstream forwarding is included in this spike. IDE-agent interception and system-level packet interception are also out of scope for v1.
+
+See the [Gate -1 runbook](docs/spike-runbook.md), [spike notes](docs/spike-notes.md) and [current decisions](DECISIONS.md).
 
 ## Support
 
