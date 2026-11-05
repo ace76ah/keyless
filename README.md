@@ -93,9 +93,20 @@ npm test
 npm run check
 ```
 
-## Gate 0: protocol contract
+## Gate 0: design specifications
 
-The Gate 0 draft is in [`docs/protocol.md`](docs/protocol.md). It defines the proposed path-based routes, project-token header, error format, streaming behavior and `keyless use` instructions. Project-token authentication and exact SDK header behavior remain to be validated; the Gate -1 dummy-key tests did not cover those details.
+The first Gate 0 specifications are now in the repository:
+
+- [HTTP protocol](docs/protocol.md) — routes, project token, errors, streaming and cancellation.
+- [Agent UX](docs/agent-ux.md) — exact `keyless use` output, token-file handling and SDK/CLI setup.
+- [V1 scope](docs/scope.md) — supported integrations, commands and non-goals.
+- [Threat model](docs/threat-model.md) — security objectives, trust boundaries and limitations.
+- [Vault format](docs/vault-format.md) — encrypted container, Argon2id bounds, AEAD and atomic writes.
+- [Approval flow](docs/approval.md) — per-OS approval, grant diff binding and reveal.
+- [Network rules](docs/network.md) — path normalization, pinned DNS/TLS, headers and redirects.
+- [JSON schemas](schemas/) — project request, vault-held grant and built-in provider definitions.
+
+These are Gate 0 design drafts, not implemented features. Project-token delivery, SDK header precedence, token revocation, OS approval and pinned-IP TLS still require implementation tests and an external human security review.
 
 ## What is not built yet
 
