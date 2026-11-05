@@ -39,15 +39,21 @@ The proposed Keyless project token is sent in:
 Authorization: Bearer <project-token>
 ```
 
-This header is reserved for Keyless. The daemon validates the token, checks that it is active and unexpired, resolves its project identity, and checks the authoritative grant held by the vault. Tokens are per-project, revocable, and may have an expiry.
+The token is issued by `keyless grant <alias>` only after interactive approval. It contains 32 bytes of CSPRNG entropy and is encoded as `klp_v1_<base64url>`. The plaintext token is stored outside the project at `~/.keyless/projects/<project-id>/project.token` (macOS/Linux) or `%LOCALAPPDATA%\\Keyless\\projects\\<project-id>\\project.token` (Windows). POSIX directory/file modes are 0700/0600; Windows uses an owner-only DACL. The encrypted vault stores the token ID and SHA-256 digest, not the plaintext. The default expiry is 30 days. The token is revoked by `keyless token revoke`.
 
-The project token is not a provider API key. It is a scoped local capability. It must never be forwarded to a provider, placed in a URL or request body, or written to logs. A same-OS-user process may still be able to read or use a project token; see the threat-model limitations in `THESIS.md` and the Gate 0 threat-model work.
+`keyless use <alias>` prints the base URL and token-file path; it never prints the token value. Application code reads the token file at runtime and sends the contents as `Authorization: Bearer <project-token>`. The exact stdout contract and SDK/CLI examples are in [agent-ux.md](agent-ux.md).
+
+The project token is not a provider API key. It is a scoped local capability. It must never be forwarded to a provider, placed in a URL or request body, or written to logs. A same-OS-user process may still be able to read or use the token file; this is an explicit limitation, not a security boundary.
 
 ### Provider SDK key fields
 
-SDKs commonly require an API-key value at construction time. In Keyless mode, that value must not be a real provider secret. The adapter must ensure the Keyless project token reaches the local proxy as `Authorization: Bearer <project-token>`. Any provider-specific placeholder key header (for example Anthropic's `x-api-key`) is stripped by the proxy and replaced with the credential retrieved from the vault.
+SDKs commonly require an API-key value at construction time. In Keyless mode, this value must be the Keyless project token or a clearly fake placeholder accompanied by an explicit custom `Authorization` header. It must never be a real provider secret.
 
-Do not assume that setting an SDK's `apiKey` field alone implements this contract for every SDK. OpenAI, Anthropic and Aider header behavior must be tested against the actual pinned versions. The Gate -1 tests only established base-URL routing with dummy keys.
+- **OpenAI Node SDK:** read the token file and pass its value as `apiKey`; the SDK should send it as `Authorization: Bearer`.
+- **Anthropic Node SDK:** read the token file and set `defaultHeaders.Authorization` to the Keyless bearer token. A fake `apiKey` may be required for SDK construction; its `x-api-key` header is stripped locally.
+- **Aider:** read the token file into the process environment and configure the custom OpenAI-compatible base URL. Do not put the token in a command-line argument.
+
+These header mappings are the proposed v1 contract, not yet proven by Gate -1. Gate 0 acceptance tests must capture the actual local headers for the pinned OpenAI SDK, Anthropic SDK and Aider versions, prove the project token is not forwarded upstream, and cover SDK header precedence.
 
 ### Header handling
 
@@ -160,45 +166,26 @@ Content-Type: application/json
 
 The local `Authorization` project token and placeholder `x-api-key` are removed. The vault-held Anthropic credential is inserted as `x-api-key`.
 
-## 6. Proposed `keyless use <alias>` output
+## 6. `keyless use <alias>` output
 
-The command prints setup instructions and the resolved local endpoint. It never prints or writes a provider credential or the raw project-token value. The exact token-delivery mechanism to local SDK processes must be implemented and tested; this draft uses `KEYLESS_PROJECT_TOKEN` as the process-local reference.
+The exact stdout format, token-file handling and SDK/CLI examples are specified in [agent-ux.md](agent-ux.md). In summary:
 
-For `keyless use openai`, the proposed output is:
+- `keyless grant <alias>` issues the project token only after an approved grant exists.
+- Token file is stored in the user-owned Keyless state directory, outside the repository, with restrictive OS permissions.
+- `keyless use <alias>` prints the resolved base URL and token-file path, not the token value.
+- Application/SDK code reads the file at runtime and supplies the token in the reserved Keyless Authorization header.
+- Default behavior is stdout only. `--write` writes safe instructions to the gitignored `.keyless/agent-instructions.md`; no token value or provider credential is written there.
 
-```text
-Keyless is ready for alias "openai".
+## 7. Gate 0 implementation validations still required
 
-Local base URL:
-  http://127.0.0.1:<port>/c/openai/v1
+The design choices below are now specified, but they must pass integration and adversarial tests before the protocol is frozen:
 
-Authentication:
-  Authorization: Bearer $KEYLESS_PROJECT_TOKEN
-
-Use the Keyless project token for this project. Do not use a real
-provider API key in your application or paste one into the agent chat.
-The local proxy replaces Keyless authentication with the approved
-provider credential from the vault.
-
-If Keyless returns HTTP 423 (vault_locked), stop and ask the user to run:
-  keyless unlock
-
-Do not retry a locked-vault request in a loop.
-```
-
-For `keyless use anthropic`, the base URL is
-`http://127.0.0.1:<port>/c/anthropic`; the SDK appends `/v1/messages`.
-The same Keyless authentication and agent instructions apply.
-
-The command may optionally write `.keyless/agent-instructions.md` after clearly reporting that it did so. If written, the file contains only the safe instructions above, never a token or provider secret, and `.keyless/` must be gitignored. The default behavior should be stdout only until the CLI UX is finalized.
-
-## 7. Gate 0 decisions still requiring validation
-
-1. **Project-token delivery:** prove the `Authorization` header can be set without leaking a provider key for the exact OpenAI SDK, Anthropic SDK and Aider versions. The dummy-key tests did not cover this.
-2. **Token lifecycle:** finalize issuance, storage location, expiry, revocation and rotation. Keep vault-held grants authoritative; a project config file is a request, not a permission grant.
-3. **SDK header precedence:** verify how each SDK combines its API-key field with custom/default headers. Do not assume the illustrative wire examples are already proven by the Gate -1 base-URL tests.
+1. **Project-token delivery:** prove the `Authorization` header reaches Keyless for the exact OpenAI SDK, Anthropic SDK and Aider versions. Gate -1 used dummy keys and did not validate this mapping.
+2. **Token lifecycle:** implement issuance after approved grant, token-file permissions, 30-day expiry, hash-only vault storage and immediate revocation. Verify file replacement and daemon restart behavior.
+3. **SDK header precedence:** verify how each SDK combines API-key fields and custom/default headers. In particular, the Anthropic placeholder `x-api-key` must never override the Keyless bearer header locally or reach the provider.
 4. **Error mapping:** test every status and code against a real SDK/agent, especially 401, 403, 423 and 429, and verify agents do not retry locked or denied requests in a loop.
-5. **Streaming and cancellation:** validate first-frame latency, incremental delivery and client-abort propagation with the official SDKs.
-6. **Port discovery and lifecycle:** implement the daemon state file and `keyless proxy status`; handle stale state and process restarts.
+5. **Streaming and cancellation:** validate first-frame latency, incremental delivery, SSE mid-stream error normalization and client-abort propagation with the official SDKs.
+6. **Port discovery and lifecycle:** implement the daemon state file and `keyless proxy status`; handle stale state, singleton locking and process restarts.
+7. **External review:** obtain a human security reviewer for the threat model, approval design, protocol and network contract before v1 release.
 
-No production vault, daemon, credential injection or upstream proxy implementation is implied by this document. Freeze this contract only after the token-delivery and error-behavior tests pass and the security review signs off.
+No production vault, daemon, credential injection or upstream proxy implementation is implied by this document. Freeze this contract only after these tests pass and the security review signs off.
