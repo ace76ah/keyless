@@ -2,6 +2,7 @@ import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import http from 'node:http';
+import net from 'node:net';
 import { createMockProxyServer } from '../spike/mock-proxy.mjs';
 
 let server;
@@ -26,6 +27,25 @@ test('health endpoint makes the mock-only boundary explicit', async () => {
   assert.equal(body.mode, 'mock-only');
   assert.equal(body.credentialsStored, false);
   assert.equal(body.upstreamCalls, false);
+});
+
+test('non-null browser origins are rejected, including preflight requests', async () => {
+  const response = await fetch(`${baseUrl}/c/openai/v1/responses`, {
+    method: 'OPTIONS',
+    headers: { origin: 'https://evil.example' }
+  });
+  const body = await response.json();
+  assert.equal(response.status, 403);
+  assert.equal(body.error, 'origin_not_allowed');
+});
+
+test('the literal null Origin value is not rejected by the origin guard', async () => {
+  const response = await fetch(`${baseUrl}/c/openai/v1/responses`, {
+    method: 'POST',
+    headers: { origin: 'null', 'content-type': 'application/json' },
+    body: '{}'
+  });
+  assert.equal(response.status, 200);
 });
 
 test('path alias returns a canned OpenAI-shaped response', async () => {
@@ -86,27 +106,56 @@ test('unsupported provider routes are rejected', async () => {
   assert.equal(body.error, 'unsupported_route');
 });
 
-test('OpenAI mock can return a small SSE stream', async () => {
-  const response = await fetch(`${baseUrl}/c/openai/v1/chat/completions`, {
-    method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ model: 'gpt-4.1-mini', stream: true, messages: [{ role: 'user', content: 'hello' }] })
+async function assertIncrementalSse(path, requestBody, firstFramePattern, lastFramePattern) {
+  const response = await fetch(`${baseUrl}${path}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(requestBody)
   });
-  const body = await response.text();
+  assert.equal(response.status, 200);
   assert.equal(response.headers.get('content-type').split(';')[0], 'text/event-stream');
-  assert.match(body, /chat\.completion\.chunk/);
-  assert.match(body, /\[DONE\]/);
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let received = '';
+  let firstFrame = '';
+
+  while (!firstFrame && !received.includes('\n\n')) {
+    const { value, done } = await reader.read();
+    assert.equal(done, false, 'stream ended before its first frame');
+    received += decoder.decode(value, { stream: true });
+    const frameEnd = received.indexOf('\n\n');
+    if (frameEnd !== -1) firstFrame = received.slice(0, frameEnd + 2);
+  }
+
+  assert.match(firstFrame, firstFramePattern);
+  assert.doesNotMatch(received, lastFramePattern, 'the final frame must not arrive with the first frame');
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    received += decoder.decode(value, { stream: true });
+  }
+  received += decoder.decode();
+  assert.match(received, lastFramePattern);
+}
+
+test('OpenAI mock streams the first SSE frame before the final frame', async () => {
+  await assertIncrementalSse(
+    '/c/openai/v1/chat/completions',
+    { model: 'gpt-4.1-mini', stream: true, messages: [{ role: 'user', content: 'hello' }] },
+    /chat\.completion\.chunk/,
+    /\[DONE\]/
+  );
 });
 
-test('Anthropic mock can return a small SSE stream', async () => {
-  const response = await fetch(`${baseUrl}/c/anthropic/v1/messages`, {
-    method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ model: 'claude-test', stream: true, messages: [{ role: 'user', content: 'hello' }] })
-  });
-  const body = await response.text();
-  assert.equal(response.headers.get('content-type').split(';')[0], 'text/event-stream');
-  assert.match(body, /event: message_start/);
-  assert.match(body, /event: content_block_delta/);
-  assert.match(body, /event: message_stop/);
+test('Anthropic mock streams the first SSE frame before the final frame', async () => {
+  await assertIncrementalSse(
+    '/c/anthropic/v1/messages',
+    { model: 'claude-test', stream: true, messages: [{ role: 'user', content: 'hello' }] },
+    /event: message_start/,
+    /event: message_stop/
+  );
 });
 
 
@@ -132,15 +181,53 @@ test('malformed JSON is rejected', async () => {
   assert.equal(body.error, 'invalid_json');
 });
 
-test('request bodies above the spike limit are rejected', async () => {
-  const response = await fetch(`${baseUrl}/c/openai/v1/responses`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ input: 'x'.repeat(1024 * 1024 + 1) })
+test('request bodies above the spike limit get a 413 and the connection closes', async () => {
+  const { port } = new URL(baseUrl);
+  const result = await new Promise((resolve, reject) => {
+    const request = http.request({
+      hostname: '127.0.0.1',
+      port: Number(port),
+      path: '/c/openai/v1/responses',
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'content-length': 2 * 1024 * 1024
+      },
+      agent: false
+    });
+    let socketClosed = false;
+    let responseResult = null;
+
+    const finishIfClosed = () => {
+      if (socketClosed && responseResult) resolve({ ...responseResult, socketClosed });
+    };
+
+    request.on('socket', (socket) => {
+      socket.once('close', () => {
+        socketClosed = true;
+        finishIfClosed();
+      });
+    });
+    request.on('response', (response) => {
+      const chunks = [];
+      response.on('data', (chunk) => chunks.push(chunk));
+      response.on('end', () => {
+        responseResult = {
+          status: response.statusCode,
+          body: JSON.parse(Buffer.concat(chunks).toString('utf8'))
+        };
+        finishIfClosed();
+      });
+    });
+    request.on('error', (error) => {
+      if (error.code !== 'ECONNRESET') reject(error);
+    });
+    request.write(Buffer.alloc(1024 * 1024 + 1, 120));
   });
-  const body = await response.json();
-  assert.equal(response.status, 413);
-  assert.equal(body.error, 'body_too_large');
+
+  assert.equal(result.status, 413);
+  assert.equal(result.body.error, 'body_too_large');
+  assert.equal(result.socketClosed, true);
 });
 
 test('non-POST provider requests are rejected', async () => {
@@ -148,7 +235,7 @@ test('non-POST provider requests are rejected', async () => {
   assert.equal(response.status, 405);
 });
 
-test('non-local Host headers are rejected', async () => {
+test('Host: evil.example is rejected as invalid_host', async () => {
   const { port } = new URL(baseUrl);
   const response = await new Promise((resolve, reject) => {
     const request = http.request({
@@ -156,7 +243,7 @@ test('non-local Host headers are rejected', async () => {
       port: Number(port),
       path: '/health',
       method: 'GET',
-      headers: { Host: 'not-local.example' },
+      headers: { Host: 'evil.example' },
       agent: false
     }, (incoming) => {
       const chunks = [];
@@ -172,4 +259,54 @@ test('non-local Host headers are rejected', async () => {
 
   assert.equal(response.status, 400);
   assert.equal(response.body.error, 'invalid_host');
+});
+
+function waitForSocketClose(port, requestText) {
+  return new Promise((resolve, reject) => {
+    const socket = net.connect(Number(port), '127.0.0.1');
+    let response = '';
+    const timeout = setTimeout(() => {
+      socket.destroy();
+      reject(new Error('The stalled request socket did not close in time.'));
+    }, 8_000);
+
+    socket.setEncoding('utf8');
+    socket.on('connect', () => socket.write(requestText));
+    socket.on('data', (chunk) => {
+      response += chunk;
+    });
+    socket.on('close', () => {
+      clearTimeout(timeout);
+      resolve(response);
+    });
+    socket.on('error', (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+  });
+}
+
+test('explicit request and header timeouts close stalled bodies and headers', async () => {
+  assert.equal(server.requestTimeout, 5_000);
+  assert.equal(server.headersTimeout, 5_000);
+  assert.equal(server.connectionsCheckingInterval, 1_000);
+
+  const { port } = new URL(baseUrl);
+  const bodyResponse = await waitForSocketClose(port, [
+    'POST /c/openai/v1/responses HTTP/1.1',
+    `Host: 127.0.0.1:${port}`,
+    'Content-Type: application/json',
+    'Content-Length: 20',
+    'Connection: close',
+    '',
+    '{}'
+  ].join('\r\n'));
+  assert.match(bodyResponse, /^HTTP\/1\.1 408 Request Timeout/m);
+
+  const headersResponse = await waitForSocketClose(port, [
+    'POST /c/openai/v1/responses HTTP/1.1',
+    `Host: 127.0.0.1:${port}`,
+    'Content-Type: application/json'
+  ].join('\r\n'));
+  assert.match(headersResponse, /^HTTP\/1\.1 408 Request Timeout/m);
 });
