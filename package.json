@@ -1,0 +1,17 @@
+{
+  "name": "keyless",
+  "version": "0.0.1",
+  "private": true,
+  "description": "A local-first credential gateway for AI-assisted development.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.14.0"
+  },
+  "scripts": {
+    "spike": "node spike/mock-proxy.mjs",
+    "test": "node --test",
+    "check": "node --check spike/mock-proxy.mjs && node --test"
+  },
+  "homepage": "https://keyless.aahmedhussa.in",
+  "author": "Ahmad Hussain"
+}
