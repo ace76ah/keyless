@@ -12,13 +12,21 @@ There is an important limit to that promise: a process running as the same opera
 
 **Status: Gate 0 — protocol contract.**
 
-Gate -1 validated the mock's path-based base-URL routing with the OpenAI Node SDK v4 and Aider CLI in owner-run tests. Both reached the local mock and accepted its canned response. The preferred alias carrier is now the URL path prefix:
+Gate -1 has passed for the tested compatibility targets. The local mock's path-based base-URL routing was validated by the owner with:
+
+- **OpenAI Node SDK v4** — custom `baseURL` worked and the SDK accepted the canned response.
+- **Anthropic Node SDK** — custom `baseURL` worked and the SDK accepted the canned response.
+- **Aider CLI** — routed an OpenAI-compatible request to the mock and displayed the response.
+
+The selected alias format is the URL path prefix:
 
 ```
-http://127.0.0.1:8787/c/<alias>/v1/...
+http://127.0.0.1:<port>/c/<alias>/...
 ```
 
-The Cursor IDE Free-tier test in the owner's setup blocked custom OpenAI base URLs. Claude Code and Anthropic SDK compatibility have not yet been tested. See [the spike notes](docs/spike-notes.md) for the evidence and limitations.
+The Cursor IDE Free-tier test in the owner's setup blocked custom OpenAI base URLs. The owner's report identifies a Pro tier or a CLI agent such as Aider as the workaround; this does not establish behavior for every Cursor plan or version. Claude Code has not been tested.
+
+These tests validate base-URL routing and mock response compatibility. They do **not** validate the production Keyless project-token header, credential injection, vault behavior, or production security. See [the spike notes](docs/spike-notes.md) for the full scorecard and limitations.
 
 The mock server remains deliberately small. It:
 
@@ -77,7 +85,7 @@ npm run check
 
 ## Gate 0: protocol contract
 
-The next step is to define the stable contract used by the CLI, local service, SDKs and agents. The protocol must be based on the Gate -1 observations, not assumptions. The remaining questions include project authentication, exact error responses, streaming expectations, agent instructions and retry behavior.
+The next step is to define the stable contract used by the CLI, local service, SDKs and agents. The Gate 0 draft is in [`docs/protocol.md`](docs/protocol.md). Project-token authentication and exact SDK header behavior remain to be validated; the Gate -1 dummy-key tests did not cover those details.
 
 The two workflows remain distinct:
 
