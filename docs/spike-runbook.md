@@ -12,6 +12,10 @@ npm run spike -- --verbose
 
 The mock binds to `127.0.0.1:8787`. Keep it running in this terminal.
 
+The spike is IPv4 loopback only. The `localhost` Host-header allowance is a convenience check; it does not bind `::1` and is not an authentication or DNS-rebinding security boundary. Production network design must deliberately bind and test both `127.0.0.1` and `::1`.
+
+Browser-origin requests are unsupported. Requests carrying an `Origin` header other than the literal `null` are rejected; this does not add browser CORS support.
+
 In another terminal, check it:
 
 ```bash
