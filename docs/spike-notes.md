@@ -12,7 +12,9 @@ The owner tested the local mock with the official OpenAI Node SDK, the official 
 - OpenAI Node SDK: v4 (exact patch version not recorded)
 - Anthropic Node SDK: official SDK (exact package version not recorded)
 - Aider CLI: tested by the owner; exact version not recorded
-- Cursor IDE: Free tier tested; custom OpenAI base URL was blocked in the tested setup
+- Cursor IDE: Free tier tested; custom OpenAI base URL returned a "Cursor Subscription Required" paywall error in the tested setup
+- Cursor built-in models: Grok and Composer bypassed the custom base URL and routed through Cursor's cloud service in the tested setup
+- GitHub Copilot: not tested; IDE interception is out of v1 scope
 - Claude Code: not tested
 
 ## Results
@@ -33,6 +35,13 @@ The owner tested the local mock with the official OpenAI Node SDK, the official 
 | Project-token authentication | Not tested | The owner SDK tests used dummy API keys. The proposed Keyless project-token header is a Gate 0 contract and still needs dedicated SDK/Aider tests. |
 | Locked/error behavior and retry pattern | Unverified | Locked-vault behavior does not exist in the mock and must be specified and tested in Gate 0/implementation. |
 | Agent attempts to edit local config/instructions | Not recorded | Observe during additional agent tests. |
+
+## Limitations and v1 scope
+
+- IDE-hosted agent interception is out of scope for v1. The Cursor Free-tier custom-endpoint test returned the subscription paywall; built-in Cursor models bypassed the custom base URL. No system-level packet interception or TLS interception will be attempted.
+- GitHub Copilot was not tested and is not a v1 target. Do not generalize the Cursor observation to every IDE or plan.
+- V1 targets direct SDK integrations and local CLI agents with custom base-URL support. Current owner-run compatibility evidence is OpenAI Node SDK v4, Anthropic Node SDK (exact version not recorded) and Aider CLI (exact version not recorded).
+- Claude Code is not tested. Project-token header delivery is not tested; the SDK spike used dummy provider keys only.
 
 ## Automated mock checks
 
@@ -61,6 +70,6 @@ The owner tested the local mock with the official OpenAI Node SDK, the official 
 - [x] Cursor Free-tier limitation documented.
 - [ ] Production project-token authentication, vault behavior and security: not evaluated by this mock.
 
-Gate -1 is closed for the tested compatibility targets. Gate 0 owns the stable protocol contract and the remaining authentication, error and workflow decisions.
+Gate -1 is complete for the tested targets: OpenAI Node SDK, Anthropic Node SDK and Aider CLI. IDE-hosted inference and system-level interception are out of v1 scope. Gate 0 owns the project-token delivery contract, error behavior, vault/grant model and implementation requirements.
 
 Owner test reports: November 5, 2026.
