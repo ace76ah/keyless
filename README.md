@@ -1,6 +1,14 @@
+<p align="center">
+  <img src="assets/keyless-banner.jpg" alt="Keyless — Give your AI the keys. Never give it the secrets." width="100%">
+</p>
+
 # Keyless
 
 **Give your AI the keys. Never give it the secrets.**
+
+<p align="center">
+  <img src="assets/keyless-logo.jpg" alt="Keyless infinity-key emblem" width="112">
+</p>
 
 I got tired of copying API keys into projects and then wondering where they would end up. Keyless is my attempt at making that part of building software less messy.
 
