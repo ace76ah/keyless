@@ -1,0 +1,377 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://keyless.local/schemas/provider.schema.json",
+  "title": "Keyless built-in provider definitions",
+  "description": "Package-shipped static provider allowlist. This schema validates built-in definitions; it is not an API for user-defined or remote providers.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "providers"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "providers": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "uniqueItems": true,
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "displayName",
+              "origin",
+              "authentication",
+              "routes",
+              "allowedRequestHeaders",
+              "requiredRequestHeaders",
+              "queryParameters",
+              "models",
+              "limits"
+            ],
+            "properties": {
+              "id": {
+                "const": "openai"
+              },
+              "displayName": {
+                "const": "OpenAI"
+              },
+              "origin": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "scheme",
+                  "hostname",
+                  "port"
+                ],
+                "properties": {
+                  "scheme": {
+                    "const": "https"
+                  },
+                  "hostname": {
+                    "const": "api.openai.com"
+                  },
+                  "port": {
+                    "const": 443
+                  }
+                }
+              },
+              "authentication": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "headerName",
+                  "valuePrefix"
+                ],
+                "properties": {
+                  "headerName": {
+                    "const": "Authorization"
+                  },
+                  "valuePrefix": {
+                    "const": "Bearer "
+                  }
+                }
+              },
+              "routes": {
+                "const": [
+                  {
+                    "method": "POST",
+                    "path": "/v1/responses"
+                  },
+                  {
+                    "method": "POST",
+                    "path": "/v1/chat/completions"
+                  }
+                ]
+              },
+              "allowedRequestHeaders": {
+                "type": "array",
+                "uniqueItems": true,
+                "maxItems": 64,
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9-]+$"
+                }
+              },
+              "requiredRequestHeaders": {
+                "type": "array",
+                "maxItems": 16,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "name",
+                    "valuePattern"
+                  ],
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9-]+$"
+                    },
+                    "valuePattern": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    }
+                  }
+                }
+              },
+              "queryParameters": {
+                "type": "array",
+                "maxItems": 32,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "name",
+                    "valuePattern"
+                  ],
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,63}$"
+                    },
+                    "valuePattern": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    }
+                  }
+                }
+              },
+              "models": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 256,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                }
+              },
+              "limits": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "requestsPerMinute",
+                  "requestsPerDay",
+                  "maxConcurrent",
+                  "maxRequestBytes",
+                  "maxResponseBytes"
+                ],
+                "properties": {
+                  "requestsPerMinute": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 600
+                  },
+                  "requestsPerDay": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100000
+                  },
+                  "maxConcurrent": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 32
+                  },
+                  "maxRequestBytes": {
+                    "type": "integer",
+                    "minimum": 1024,
+                    "maximum": 10485760
+                  },
+                  "maxResponseBytes": {
+                    "type": "integer",
+                    "minimum": 1024,
+                    "maximum": 67108864
+                  }
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "displayName",
+              "origin",
+              "authentication",
+              "routes",
+              "allowedRequestHeaders",
+              "requiredRequestHeaders",
+              "queryParameters",
+              "models",
+              "limits"
+            ],
+            "properties": {
+              "id": {
+                "const": "anthropic"
+              },
+              "displayName": {
+                "const": "Anthropic"
+              },
+              "origin": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "scheme",
+                  "hostname",
+                  "port"
+                ],
+                "properties": {
+                  "scheme": {
+                    "const": "https"
+                  },
+                  "hostname": {
+                    "const": "api.anthropic.com"
+                  },
+                  "port": {
+                    "const": 443
+                  }
+                }
+              },
+              "authentication": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "headerName",
+                  "valuePrefix"
+                ],
+                "properties": {
+                  "headerName": {
+                    "const": "x-api-key"
+                  },
+                  "valuePrefix": {
+                    "const": ""
+                  }
+                }
+              },
+              "routes": {
+                "const": [
+                  {
+                    "method": "POST",
+                    "path": "/v1/messages"
+                  }
+                ]
+              },
+              "allowedRequestHeaders": {
+                "type": "array",
+                "uniqueItems": true,
+                "maxItems": 64,
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9-]+$"
+                }
+              },
+              "requiredRequestHeaders": {
+                "type": "array",
+                "maxItems": 16,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "name",
+                    "valuePattern"
+                  ],
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9-]+$"
+                    },
+                    "valuePattern": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    }
+                  }
+                }
+              },
+              "queryParameters": {
+                "type": "array",
+                "maxItems": 32,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "name",
+                    "valuePattern"
+                  ],
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,63}$"
+                    },
+                    "valuePattern": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    }
+                  }
+                }
+              },
+              "models": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 256,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                }
+              },
+              "limits": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "requestsPerMinute",
+                  "requestsPerDay",
+                  "maxConcurrent",
+                  "maxRequestBytes",
+                  "maxResponseBytes"
+                ],
+                "properties": {
+                  "requestsPerMinute": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 600
+                  },
+                  "requestsPerDay": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100000
+                  },
+                  "maxConcurrent": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 32
+                  },
+                  "maxRequestBytes": {
+                    "type": "integer",
+                    "minimum": 1024,
+                    "maximum": 10485760
+                  },
+                  "maxResponseBytes": {
+                    "type": "integer",
+                    "minimum": 1024,
+                    "maximum": 67108864
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}
