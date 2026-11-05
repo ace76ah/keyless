@@ -93,7 +93,7 @@ For this draft, `error` and `code` contain the same stable identifier. `message`
 | 401 | `token_invalid` | Project token is missing, invalid, revoked or expired. | Stop and ask the user to run `keyless use <alias>` or re-authorize the project. Do not loop. |
 | 403 | `forbidden_host`, `forbidden_method`, `forbidden_path` | The request is outside the provider or project grant. | Stop and explain the denied operation. Ask the user to review the grant. |
 | 404 | `unknown_alias` | The alias is not configured. | Stop and ask the user to check the alias and configure it with Keyless. |
-| 405 | `forbidden_method` | The HTTP method is not supported by the endpoint. | Stop; do not retry with a different method automatically. |
+| 405 | `method_not_allowed` | The HTTP method is not supported by the proxy endpoint at all. | Stop; do not retry with a different method automatically. |
 | 413 | `body_too_large` | Request body exceeds the configured limit. | Reduce the request size; do not retry unchanged input. |
 | 423 | `vault_locked` | The vault is locked or the unlock session is unavailable. | Fail fast. Tell the user to run `keyless unlock`; do not retry in a loop. The agent can retry the original request after the user unlocks. |
 | 429 | `rate_limited` | A request or concurrency quota was reached. | Respect the `Retry-After` response header. Do not retry sooner. |
