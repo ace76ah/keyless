@@ -4,8 +4,12 @@ import http from 'node:http';
 import { pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
 
+// The spike binds IPv4 loopback only; production must deliberately support and test 127.0.0.1 and ::1.
 const HOST = '127.0.0.1';
 const DEFAULT_PORT = 8787;
+const REQUEST_TIMEOUT_MS = 5_000;
+const HEADERS_TIMEOUT_MS = 5_000;
+const TIMEOUT_CHECK_INTERVAL_MS = 1_000;
 const MAX_BODY_BYTES = 1024 * 1024;
 const MOCK_TEXT = 'This is a Keyless mock response. No provider was contacted.';
 
@@ -53,29 +57,59 @@ function routeRequest(request) {
   return { alias, mode, upstreamPath };
 }
 
-async function readBody(request) {
-  const chunks = [];
-  let size = 0;
-  let tooLarge = false;
+function readBody(request) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
 
-  for await (const chunk of request) {
-    size += chunk.length;
-    if (size > MAX_BODY_BYTES) {
-      tooLarge = true;
-      chunks.length = 0;
-    } else if (!tooLarge) {
+    const cleanup = () => {
+      request.off('data', onData);
+      request.off('end', onEnd);
+      request.off('error', onError);
+      request.off('aborted', onAborted);
+    };
+
+    const onData = (chunk) => {
+      size += chunk.length;
+      if (size > MAX_BODY_BYTES) {
+        chunks.length = 0;
+        cleanup();
+        request.pause();
+        resolve({ tooLarge: true, value: null });
+        return;
+      }
       chunks.push(chunk);
-    }
-  }
+    };
 
-  if (tooLarge) return { tooLarge: true, value: null };
-  if (chunks.length === 0) return { tooLarge: false, value: {} };
+    const onEnd = () => {
+      cleanup();
+      if (chunks.length === 0) {
+        resolve({ tooLarge: false, value: {} });
+        return;
+      }
 
-  try {
-    return { tooLarge: false, value: JSON.parse(Buffer.concat(chunks).toString('utf8')) };
-  } catch {
-    return { tooLarge: false, invalidJson: true, value: null };
-  }
+      try {
+        resolve({ tooLarge: false, value: JSON.parse(Buffer.concat(chunks).toString('utf8')) });
+      } catch {
+        resolve({ tooLarge: false, invalidJson: true, value: null });
+      }
+    };
+
+    const onError = (error) => {
+      cleanup();
+      reject(error);
+    };
+
+    const onAborted = () => {
+      cleanup();
+      reject(new Error('Request body was aborted by the client.'));
+    };
+
+    request.on('data', onData);
+    request.once('end', onEnd);
+    request.once('error', onError);
+    request.once('aborted', onAborted);
+  });
 }
 
 function openAIResponse(path) {
@@ -152,9 +186,18 @@ async function sendSse(response, alias) {
   response.end();
 }
 
-async function handleRequest(request, response, server, verbose) {
+async function handleRequest(request, response, server, verbose, requestId) {
+  const origin = request.headers.origin;
+  if (origin !== undefined && origin !== 'null') {
+    json(response, 403, { error: 'origin_not_allowed', message: 'Browser-origin requests are not supported by this spike.' });
+    request.resume();
+    return;
+  }
+
   const address = server.address();
   const port = typeof address === 'object' && address ? address.port : null;
+
+  // Convenience check only: Host can be spoofed by a local client; this is not authentication or a security boundary.
   const acceptedHosts = new Set([`127.0.0.1:${port}`, `localhost:${port}`]);
 
   if (!acceptedHosts.has(request.headers.host)) {
@@ -185,6 +228,8 @@ async function handleRequest(request, response, server, verbose) {
 
   const body = await readBody(request);
   if (body.tooLarge) {
+    // Send the bounded error response first, then close the socket instead of draining an unbounded body.
+    response.once('finish', () => request.destroy());
     json(response, 413, { error: 'body_too_large', message: 'The spike accepts request bodies up to 1 MiB.' });
     return;
   }
@@ -194,7 +239,7 @@ async function handleRequest(request, response, server, verbose) {
   }
 
   if (verbose) {
-    process.stderr.write(`[spike] ${request.method} ${route.alias} ${route.upstreamPath} alias=${route.mode}\n`);
+    process.stderr.write(`[spike:${String(requestId).padStart(6, '0')}] ${request.method} ${route.alias} ${route.upstreamPath} alias=${route.mode}\n`);
   }
 
   if (body.value?.stream === true && route.upstreamPath === '/v1/chat/completions' && route.alias === 'openai') {
@@ -214,8 +259,10 @@ async function handleRequest(request, response, server, verbose) {
 
 export function createMockProxyServer({ verbose = false } = {}) {
   let server;
+  let nextRequestId = 0;
   server = http.createServer((request, response) => {
-    void handleRequest(request, response, server, verbose).catch(() => {
+    const requestId = ++nextRequestId;
+    void handleRequest(request, response, server, verbose, requestId).catch(() => {
       if (!response.headersSent) {
         json(response, 500, { error: 'mock_error', message: 'The local mock could not complete the request.' });
       } else {
@@ -223,10 +270,14 @@ export function createMockProxyServer({ verbose = false } = {}) {
       }
     });
   });
+  server.requestTimeout = REQUEST_TIMEOUT_MS;
+  server.headersTimeout = HEADERS_TIMEOUT_MS;
+  server.connectionsCheckingInterval = TIMEOUT_CHECK_INTERVAL_MS;
   return server;
 }
 
 function start() {
+  // This environment variable selects the local port; it is not an authentication mechanism.
   const port = Number(process.env.KEYLESS_SPIKE_PORT || DEFAULT_PORT);
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     throw new Error('KEYLESS_SPIKE_PORT must be a valid TCP port.');
