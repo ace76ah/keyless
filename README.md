@@ -25,7 +25,7 @@ The mock server remains deliberately small. It:
 - accepts a fake `openai` or `anthropic` credential alias;
 - supports both path and header aliases so the two carriers can be compared;
 - returns canned provider-shaped responses, including a small SSE demo;
-- binds to `127.0.0.1) by default;
+- binds to `127.0.0.1` by default;
 - does not store, decrypt, attach, or forward credentials;
 - does not make requests to OpenAI, Anthropic, or any other upstream service.
 
