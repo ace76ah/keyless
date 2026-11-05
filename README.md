@@ -114,6 +114,8 @@ The first Gate 0 specifications are now in the repository:
 - [Network rules](docs/network.md) — path normalization, pinned DNS/TLS, headers and redirects.
 - [JSON schemas](schemas/) — project request, vault-held grant and built-in provider definitions.
 
+See the [Gate 0 project-token validation plan](docs/gate0-test-plan.md) and executable reference contract harness in `test/project-token-contract.test.mjs`. The harness is a protocol fixture, not production authentication or proof of SDK compatibility.
+
 These are Gate 0 design drafts, not implemented features. Project-token delivery, SDK header precedence, token revocation, OS approval and pinned-IP TLS still require implementation tests and an external human security review.
 
 ## What is not built yet

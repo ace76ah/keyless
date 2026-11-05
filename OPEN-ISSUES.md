@@ -1,6 +1,6 @@
 # Open issues before the production build
 
-Gate -1 compatibility spike is closed for the tested targets. Gate 0 design artifacts are drafted and committed. The remaining work below is deliberately separated from production implementation.
+Gate -1 compatibility spike is closed for the tested targets. Gate 0 design artifacts are drafted and committed. A test-only project-token reference harness now checks digest matching, token rejection, grant denial, path stripping and credential replacement against a fake upstream; it does not validate official SDK header behavior or production code. See [the validation plan](docs/gate0-test-plan.md). The remaining work below is deliberately separated from production implementation.
 
 ## Gate 0 validation and sign-off
 
