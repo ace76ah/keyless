@@ -10,14 +10,22 @@ There is an important limit to that promise: a process running as the same opera
 
 ## Where this repo is right now
 
-This repository starts with **Gate -1: a compatibility spike** from the v2 build plan. It is deliberately not the real vault or production proxy yet.
+**Status: Gate 0 — protocol contract.**
 
-The mock server:
+Gate -1 validated the mock's path-based base-URL routing with the OpenAI Node SDK v4 and Aider CLI in owner-run tests. Both reached the local mock and accepted its canned response. The preferred alias carrier is now the URL path prefix:
+
+```
+http://127.0.0.1:8787/c/<alias>/v1/...
+```
+
+The Cursor IDE Free-tier test in the owner's setup blocked custom OpenAI base URLs. Claude Code and Anthropic SDK compatibility have not yet been tested. See [the spike notes](docs/spike-notes.md) for the evidence and limitations.
+
+The mock server remains deliberately small. It:
 
 - accepts a fake `openai` or `anthropic` credential alias;
-- lets us compare an alias in the URL path with an alias in a header;
+- supports both path and header aliases so the two carriers can be compared;
 - returns canned provider-shaped responses, including a small SSE demo;
-- binds to `127.0.0.1` by default;
+- binds to `127.0.0.1) by default;
 - does not store, decrypt, attach, or forward credentials;
 - does not make requests to OpenAI, Anthropic, or any other upstream service.
 
@@ -25,7 +33,7 @@ The mock server:
 
 ## Run it
 
-Node.js 22.14 or newer is required.
+Node.js 22.9 or newer is required.
 
 ```bash
 npm run spike
@@ -39,7 +47,7 @@ In another terminal:
 curl http://127.0.0.1:8787/health
 ```
 
-Try the path alias:
+Try the preferred path alias:
 
 ```bash
 curl -i http://127.0.0.1:8787/c/openai/v1/responses \
@@ -48,7 +56,7 @@ curl -i http://127.0.0.1:8787/c/openai/v1/responses \
   -d '{"model":"gpt-4.1-mini","input":"hello from the local spike"}'
 ```
 
-Try the header alias:
+The header alias is still available for comparison:
 
 ```bash
 curl -i http://127.0.0.1:8787/v1/messages \
@@ -67,27 +75,23 @@ npm test
 npm run check
 ```
 
-## Gate -1: what we need to learn
+## Gate 0: protocol contract
 
-The spike is testing two different workflows. They should not be confused:
+The next step is to define the stable contract used by the CLI, local service, SDKs and agents. The protocol must be based on the Gate -1 observations, not assumptions. The remaining questions include project authentication, exact error responses, streaming expectations, agent instructions and retry behavior.
 
-1. **App/tool mode:** Cursor or Claude Code helps build an application, and code running locally in that project calls the Keyless endpoint. This is the first workflow to validate.
-2. **Agent-inference mode:** a local coding agent that supports a custom API base URL sends its own model requests through the endpoint. This is a separate experiment; it is not how every IDE routes its own AI backend.
+The two workflows remain distinct:
 
-Follow [`docs/spike-runbook.md`](docs/spike-runbook.md), then record what actually happened in [`docs/spike-notes.md`](docs/spike-notes.md). The Gate -1 result is still pending until the two real agent workflows have been tried on a developer machine.
+1. **App/tool mode:** Cursor or Claude Code helps build an application, and code running locally in that project calls the Keyless endpoint.
+2. **Agent-inference mode:** a local coding agent that supports a custom API base URL sends its own model requests through the endpoint. Aider has passed this path in the owner-run test. Other agents must be tested individually.
+
+See the [Gate -1 runbook](docs/spike-runbook.md), [spike notes](docs/spike-notes.md) and [current decisions](DECISIONS.md).
 
 ## What is not built yet
 
-No encrypted vault, credential storage, grant system, human approval, daemon, production network client, or real upstream forwarding is included in this spike. Those come after the workflow is validated and the protocol is written from what we learn.
+No encrypted vault, credential storage, grant system, human approval, daemon, production network client, or real upstream forwarding is included in this spike. Those are Gate 0/implementation work, not features of the current mock.
 
 ## Support
 
 For project support, email [contact@aahmedhussa.in](mailto:contact@aahmedhussa.in).
-
-## Project notes
-
-- [Gate -1 runbook](docs/spike-runbook.md)
-- [Gate -1 notes](docs/spike-notes.md)
-- [Current decisions](DECISIONS.md)
 
 This is an early experiment. I would rather find out that the workflow needs changing now than build a lot of infrastructure around the wrong interface.
