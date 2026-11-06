@@ -39,7 +39,7 @@ The current implementation is intentionally narrower than the full design docume
 After the package is published to npm:
 
 ```bash
-npm install -g keyless
+npm install -g @ace76ah/keyless
 ```
 
 Then verify:
@@ -57,7 +57,7 @@ npm install
 npm link
 ```
 
-If the npm package name is unavailable or the package has not yet been published, install from the repository checkout using the development instructions above.
+The published npm package is scoped as `@ace76ah/keyless`; the installed command remains `keyless`.
 
 ## Quickstart
 
