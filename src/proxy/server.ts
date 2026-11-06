@@ -1,7 +1,7 @@
 import http, { type IncomingMessage, type ServerResponse } from 'node:http';
 import net from 'node:net';
 import { performance } from 'node:perf_hooks';
-import { resolveIpcAddress } from '../daemon/ipc.ts';
+import { resolveIpcAddress } from '../daemon/ipc.js';
 
 export type ProxyOptions = { socketPath: string; host?: string; port?: number; upstreamFetch?: typeof fetch; maxRequestBytes?: number };
 export type ProxyHandle = { address: string; port: number; close(): Promise<void> };
@@ -105,7 +105,7 @@ export async function createProxyServer(options: ProxyOptions): Promise<ProxyHan
       }
       headers.set(provider.authHeader, `${provider.prefix}${credential.secret}`);
       const upstream = await upstreamFetch(`https://${provider.host}${route.upstreamPath}`, {
-        method: req.method, headers, body: body.length ? body : undefined, redirect: 'manual',
+        method: req.method ?? "GET", headers, body: body.length ? new Uint8Array(body) : undefined, redirect: 'manual',
       });
       try { await audit(upstream.status); }
       catch {

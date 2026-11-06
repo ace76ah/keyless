@@ -1,4 +1,4 @@
-import { readAuditEvents, verifyAuditLog } from '../../daemon/audit.ts';
+import { readAuditEvents, verifyAuditLog } from '../../daemon/audit.js';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 

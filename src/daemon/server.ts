@@ -2,9 +2,9 @@ import { createInterface } from 'node:readline';
 import { pathToFileURL } from 'node:url';
 import { resolve, join } from 'node:path';
 import { homedir } from 'node:os';
-import { Vault } from '../vault/vault.ts';
-import { createIpcServer, type IpcServerHandle } from './ipc.ts';
-import { AuditLog, type ProxyAuditInput } from './audit.ts';
+import { Vault } from '../vault/vault.js';
+import { createIpcServer, type IpcServerHandle } from './ipc.js';
+import { AuditLog, type ProxyAuditInput } from './audit.js';
 
 export type DaemonOptions = {
   vaultPath: string;

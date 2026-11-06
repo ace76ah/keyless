@@ -3,7 +3,7 @@ import { mkdtemp, readFile, stat, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { realFs } from "../src/vault/fs.ts";
+import { realFs } from "../dist/vault/fs.js";
 
 test("writeFileTmp and fsyncAndRename move content to the final path", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "keyless-fs-"));
@@ -18,7 +18,6 @@ test("writeFileTmp and fsyncAndRename move content to the final path", async () 
     await rm(dir, { recursive: true, force: true });
   }
 });
-
 test("writeFileTmp applies mode 0600 on POSIX", { skip: process.platform === "win32" }, async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "keyless-fs-"));
   const file = path.join(dir, "vault.tmp");
@@ -29,7 +28,6 @@ test("writeFileTmp applies mode 0600 on POSIX", { skip: process.platform === "wi
     await rm(dir, { recursive: true, force: true });
   }
 });
-
 test("unlink ignores a nonexistent path", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "keyless-fs-"));
   try {

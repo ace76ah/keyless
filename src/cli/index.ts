@@ -6,10 +6,10 @@ import { homedir } from 'node:os';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import net from 'node:net';
 import { randomUUID } from 'node:crypto';
-import { Vault } from '../vault/vault.ts';
-import { resolveIpcAddress } from '../daemon/ipc.ts';
-import { runGrantCommand, type GrantInput } from './commands/grant.ts';
-import { runLogCommand } from './commands/log.ts';
+import { Vault } from '../vault/vault.js';
+import { resolveIpcAddress } from '../daemon/ipc.js';
+import { runGrantCommand, type GrantInput } from './commands/grant.js';
+import { runLogCommand } from './commands/log.js';
 
 const HOME = homedir();
 const DEFAULT_DIR = join(HOME, '.keyless');
@@ -91,6 +91,25 @@ async function waitForDaemon(socketPath: string, child: ReturnType<typeof spawn>
 }
 
 export async function main(argv = process.argv.slice(2)): Promise<void> {
+
+  if (argv.includes("--help") || argv.includes("-h")) {
+    process.stdout.write(`Keyless - secure credential gateway
+
+Usage:
+  keyless init
+  keyless add <alias> --provider openai|anthropic
+  keyless grant <alias> [options]
+  keyless daemon start|status
+  keyless proxy start
+  keyless lock
+  keyless log
+
+Options:
+  -h, --help    Show this help menu
+`);
+    process.exit(0);
+  }
+
   const [command, ...tail] = argv;
   const action = (command === 'daemon' || command === 'proxy' || command === 'add' || command === 'grant') ? tail[0] : undefined;
   const args = action === undefined ? tail : tail.slice(1);

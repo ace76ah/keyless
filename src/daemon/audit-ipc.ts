@@ -1,6 +1,6 @@
 import net from 'node:net';
-import { resolveIpcAddress } from './ipc.ts';
-import type { ProxyAuditInput } from './audit.ts';
+import { resolveIpcAddress } from './ipc.js';
+import type { ProxyAuditInput } from './audit.js';
 
 export async function sendProxyAudit(socketPath: string, event: ProxyAuditInput): Promise<void> {
   await new Promise<void>((resolve, reject) => {

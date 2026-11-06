@@ -1,9 +1,9 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { deriveKey, encrypt, decrypt } from '../src/vault/crypto.ts';
+import { deriveKey, encrypt, decrypt } from '../dist/vault/crypto.js';
 import { argon2id } from '@noble/hashes/argon2';
 import { randomBytes } from 'node:crypto';
-import { WrongPassphraseError } from '../src/vault/errors.ts';
+import { WrongPassphraseError } from '../dist/vault/errors.js';
 
 test('deriveKey is deterministic and returns 32 bytes', async () => {
   const salt = randomBytes(16);

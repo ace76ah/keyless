@@ -1,6 +1,6 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { buildAad } from '../src/vault/format.ts';
+import { buildAad } from '../dist/vault/format.js';
 
 // Frozen known-answer vector for format version 1. Any change requires a
 // format-version review and a matching documentation update.

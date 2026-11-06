@@ -3,9 +3,9 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { Vault } from '../src/vault/vault.ts';
-import { realFs } from '../src/vault/fs.ts';
-import { parseVault } from '../src/vault/format.ts';
+import { Vault } from '../dist/vault/vault.js';
+import { realFs } from '../dist/vault/fs.js';
+import { parseVault } from '../dist/vault/format.js';
 
 test('failed atomic replacement leaves disk and memory unchanged', async (t) => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'keyless-failed-write-'));

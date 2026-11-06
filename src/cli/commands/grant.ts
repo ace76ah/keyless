@@ -3,7 +3,7 @@ import { createInterface } from 'node:readline';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import net from 'node:net';
-import { resolveIpcAddress } from '../../daemon/ipc.ts';
+import { resolveIpcAddress } from '../../daemon/ipc.js';
 
 export type GrantInput = {
   alias: string;

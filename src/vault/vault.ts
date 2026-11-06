@@ -1,11 +1,11 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
-import { type VaultFs, realFs } from './fs.ts';
-import { deriveKey, encrypt, decrypt } from './crypto.ts';
-import { buildAad, serializeVault, parseVault, parseGeneration } from './format.ts';
+import { type VaultFs, realFs } from './fs.js';
+import { deriveKey, encrypt, decrypt } from './crypto.js';
+import { buildAad, serializeVault, parseVault, parseGeneration } from './format.js';
 import {
   VaultConflictError, VaultLockedError, VaultIoError, VaultError,
   WrongPassphraseError, VaultFormatError,
-} from './errors.ts';
+} from './errors.js';
 
 type Credential = { provider: string; secret: string };
 export type ProjectGrant = {

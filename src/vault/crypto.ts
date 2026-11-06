@@ -1,8 +1,8 @@
 import { randomBytes } from 'node:crypto';
 import { Worker } from 'node:worker_threads';
 import { xchacha20poly1305 } from '@noble/ciphers/chacha';
-import { KDF_LIMITS } from './format.ts';
-import { KdfParamsError, WrongPassphraseError } from './errors.ts';
+import { KDF_LIMITS } from './format.js';
+import { KdfParamsError, WrongPassphraseError } from './errors.js';
 
 export async function deriveKey(
   passphrase: Buffer,
@@ -19,7 +19,7 @@ export async function deriveKey(
   const passphraseCopy = Buffer.from(passphrase);
   const saltCopy = Buffer.from(salt);
   return new Promise<Buffer>((resolve, reject) => {
-    const worker = new Worker(new URL('./kdf-worker.ts', import.meta.url), {
+    const worker = new Worker(new URL('./kdf-worker.js', import.meta.url), {
       workerData: { passphrase: passphraseCopy, salt: saltCopy, params },
     });
     let settled = false;

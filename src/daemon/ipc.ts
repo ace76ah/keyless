@@ -89,7 +89,7 @@ export async function createIpcServer(options: IpcServerOptions): Promise<IpcSer
           return;
         }
         const requestLine = Buffer.from(line);
-        queue = queue.then(async () => {
+        queue = (queue.then(async () => {
           if (socket.destroyed) return;
           let parsed: unknown;
           try {
@@ -119,7 +119,7 @@ export async function createIpcServer(options: IpcServerOptions): Promise<IpcSer
             const message = error instanceof Error ? error.message : 'request failed';
             await writeJsonLine(socket, { ok: false, error: message });
           }
-        }).catch(() => socket.destroy());
+        }) as Promise<void>).catch(() => { socket.destroy(); });
       }
 
       if (buffered.length > maxLineBytes) {

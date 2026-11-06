@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { AuditLog, verifyAuditLog, readAuditEvents } from '../src/daemon/audit.ts';
+import { AuditLog, verifyAuditLog, readAuditEvents } from '../dist/daemon/audit.js';
 
 const event = (status = 200) => ({
   projectId: 'project-test',

@@ -1,5 +1,5 @@
 import { Buffer } from 'node:buffer';
-import { KdfParamsError, VaultFormatError, VaultVersionError } from './errors.ts';
+import { KdfParamsError, VaultFormatError, VaultVersionError } from './errors.js';
 
 export const VAULT_MAGIC = 'KEYLESS' as const;
 export const VAULT_VERSION = 1 as const;
