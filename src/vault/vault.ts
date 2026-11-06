@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { type VaultFs, realFs } from './fs.ts';
 import { deriveKey, encrypt, decrypt } from './crypto.ts';
 import { buildAad, serializeVault, parseVault, parseGeneration } from './format.ts';
@@ -7,6 +7,17 @@ import {
   WrongPassphraseError, VaultFormatError,
 } from './errors.ts';
 
+type Credential = { provider: string; secret: string };
+export type ProjectGrant = {
+  alias: string; provider?: string; host: string; enabled: boolean;
+  methods?: string[]; paths?: string[]; queryParameters?: string[]; models?: string[];
+  limits?: Record<string, number>; revision?: number; approval?: Record<string, unknown>;
+};
+type StoredToken = {
+  projectId: string; tokenHashSha256: string; issuedAt: string; expiresAt: string;
+  revokedAt?: string; status: 'active' | 'revoked' | 'expired';
+};
+type Project = { projectId: string; grants: ProjectGrant[] };
 const DEFAULT_KDF = Object.freeze({ m: 65536, t: 3, p: 4 });
 const MAX_GENERATION = 0xffff_ffff_ffff_ffffn;
 
@@ -14,7 +25,9 @@ export class Vault {
   private _path: string;
   private _fs: VaultFs;
   private _key: Buffer | null = null;
-  private _credentials: Record<string, { provider: string; secret: string }> | null = null;
+  private _credentials: Record<string, Credential> | null = null;
+  private _tokens: StoredToken[] = [];
+  private _projects: Project[] = [];
   private _generation = 0n;
   private _vaultId: Buffer | null = null;
   private _kdfParams: { algorithm: 'argon2id'; m: number; t: number; p: number } | null = null;
@@ -26,228 +39,169 @@ export class Vault {
   static async create(path: string, passphrase: string): Promise<Vault> {
     const vault = new Vault(path, realFs);
     await vault._withLock(async () => {
-      // A lock serializes creators; this existence check prevents accidental overwrite.
-      try {
-        await realFs.readFile(path);
-        throw new VaultIoError('vault already exists');
-      } catch (error) {
+      try { await realFs.readFile(path); throw new VaultIoError('vault already exists'); }
+      catch (error) {
         if (error instanceof VaultIoError) throw error;
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       }
-      const salt = randomBytes(16);
-      const vaultId = randomBytes(16);
+      const salt = randomBytes(16); const vaultId = randomBytes(16);
       const key = await deriveKey(Buffer.from(passphrase, 'utf8'), salt, DEFAULT_KDF);
-      vault._key = key;
-      vault._salt = salt;
-      vault._vaultId = vaultId;
-      vault._generation = 0n;
-      vault._credentials = {};
+      vault._key = key; vault._salt = salt; vault._vaultId = vaultId; vault._generation = 0n;
+      vault._credentials = {}; vault._tokens = []; vault._projects = [];
       vault._kdfParams = { algorithm: 'argon2id', ...DEFAULT_KDF };
-      try { await vault._writeSnapshot({}, 0n); }
+      try { await vault._writeSnapshot({}, [], [], 0n); }
       catch (error) { key.fill(0); vault._key = null; throw error; }
     });
     return vault;
   }
 
   static async open(path: string, passphrase: string, fs: VaultFs = realFs): Promise<Vault> {
-    const vault = new Vault(path, fs);
-    let key: Buffer | null = null;
+    const vault = new Vault(path, fs); let key: Buffer | null = null;
     try {
-      const data = parseVault(await fs.readFile(path));
-      const salt = Buffer.from(data.kdf.salt, 'base64');
+      const data = parseVault(await fs.readFile(path)); const salt = Buffer.from(data.kdf.salt, 'base64');
       key = await deriveKey(Buffer.from(passphrase, 'utf8'), salt, data.kdf);
-      const vaultId = Buffer.from(data.vaultId, 'base64');
-      const generation = parseGeneration(data.generation);
-      const aad = buildAad({
-        version: data.version, vaultId, generation,
-        kdf: { ...data.kdf, salt },
-      });
-      const plaintext = decrypt(
-        key,
-        Buffer.from(data.payload.nonce, 'base64'),
-        Buffer.from(data.payload.ciphertext, 'base64'),
-        Buffer.from(data.payload.tag, 'base64'),
-        aad,
-      );
+      const vaultId = Buffer.from(data.vaultId, 'base64'); const generation = parseGeneration(data.generation);
+      const aad = buildAad({ version: data.version, vaultId, generation, kdf: { ...data.kdf, salt } });
+      const plaintext = decrypt(key, Buffer.from(data.payload.nonce, 'base64'), Buffer.from(data.payload.ciphertext, 'base64'), Buffer.from(data.payload.tag, 'base64'), aad);
       let payload: unknown;
-      try { payload = JSON.parse(plaintext.toString('utf8')); }
-      catch { throw new WrongPassphraseError('vault cannot be opened'); }
+      try { payload = JSON.parse(plaintext.toString('utf8')); } catch { throw new WrongPassphraseError('vault cannot be opened'); }
       finally { plaintext.fill(0); }
-      if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-        throw new WrongPassphraseError('vault cannot be opened');
-      }
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new WrongPassphraseError('vault cannot be opened');
       const value = payload as Record<string, unknown>;
-      if (value.vaultId !== data.vaultId || !value.credentials || typeof value.credentials !== 'object' || Array.isArray(value.credentials)) {
-        throw new WrongPassphraseError('vault cannot be opened');
-      }
-      vault._key = key;
-      vault._salt = salt;
-      vault._vaultId = vaultId;
-      vault._generation = generation;
-      vault._credentials = value.credentials as Record<string, { provider: string; secret: string }>;
+      if (value.vaultId !== data.vaultId || !value.credentials || typeof value.credentials !== 'object' || Array.isArray(value.credentials)) throw new WrongPassphraseError('vault cannot be opened');
+      vault._key = key; vault._salt = salt; vault._vaultId = vaultId; vault._generation = generation;
+      vault._credentials = value.credentials as Record<string, Credential>;
+      vault._tokens = Array.isArray(value.tokens) ? value.tokens as StoredToken[] : [];
+      vault._projects = Array.isArray(value.projects) ? value.projects as Project[] : [];
       vault._kdfParams = { algorithm: 'argon2id', m: data.kdf.m, t: data.kdf.t, p: data.kdf.p };
-      key = null;
-      return vault;
+      key = null; return vault;
     } catch (error) {
       key?.fill(0);
       if (error instanceof WrongPassphraseError || error instanceof VaultFormatError || error instanceof VaultIoError) throw error;
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT' || error instanceof Error && error.message.includes('read')) {
-        throw new VaultIoError('cannot read vault file');
-      }
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT' || error instanceof Error && error.message.includes('read')) throw new VaultIoError('cannot read vault file');
       throw error;
     }
   }
 
   get generation(): bigint { this._assertOpen(); return this._generation; }
-
   async list(): Promise<string[]> { this._assertOpen(); return Object.keys(this._credentials!); }
 
   async add(name: string, provider: string, secret: string): Promise<void> {
-    this._assertOpen();
-    if (!name || !provider || typeof secret !== 'string') throw new VaultError('invalid credential');
+    this._assertOpen(); if (!name || !provider || typeof secret !== 'string') throw new VaultError('invalid credential');
     if (Object.hasOwn(this._credentials!, name)) throw new VaultError('credential already exists');
-    const nextGeneration = this._nextGeneration();
-    const nextCredentials = { ...this._credentials!, [name]: { provider, secret } };
-    await this._writeTransaction(nextCredentials, nextGeneration);
-    this._credentials = nextCredentials;
-    this._generation = nextGeneration;
+    const next = { ...this._credentials!, [name]: { provider, secret } };
+    await this._mutate(next, this._tokens, this._projects);
   }
 
   async remove(name: string): Promise<void> {
+    this._assertOpen(); if (!Object.hasOwn(this._credentials!, name)) return;
+    const next = { ...this._credentials! }; delete next[name]; await this._mutate(next, this._tokens, this._projects);
+  }
+
+  /** Store only a SHA-256 digest; the plaintext token is returned to the caller, never persisted. */
+  async addToken(projectId: string, token: string, expiresAt: string, grants: ProjectGrant[]): Promise<void> {
     this._assertOpen();
-    if (!Object.hasOwn(this._credentials!, name)) return;
-    const nextGeneration = this._nextGeneration();
-    const nextCredentials = { ...this._credentials! };
-    delete nextCredentials[name];
-    await this._writeTransaction(nextCredentials, nextGeneration);
-    this._credentials = nextCredentials;
-    this._generation = nextGeneration;
+    if (!/^[0-9a-f-]{36}$/i.test(projectId) || typeof token !== 'string' || token.length < 20) throw new VaultError('invalid project token');
+    const expiry = Date.parse(expiresAt);
+    if (!Number.isFinite(expiry) || expiry <= Date.now()) throw new VaultError('token expiry must be in the future');
+    if (!Array.isArray(grants) || grants.length < 1 || grants.length > 32) throw new VaultError('token requires 1–32 grants');
+    for (const grant of grants) {
+      if (!grant || !/^[a-z][a-z0-9_-]{0,31}$/.test(grant.alias) || !['api.openai.com', 'api.anthropic.com'].includes(grant.host) || typeof grant.enabled !== 'boolean') throw new VaultError('invalid grant');
+      if (grant.enabled && (!Array.isArray(grant.methods) || !Array.isArray(grant.paths) || grant.methods.length === 0 || grant.paths.length === 0)) throw new VaultError('enabled grants require methods and paths');
+    }
+    const digest = createHash('sha256').update(token, 'utf8').digest('hex');
+    if (this._tokens.some((entry) => entry.projectId === projectId && entry.status === 'active')) throw new VaultError('project already has an active token');
+    const tokens = [...this._tokens, { projectId, tokenHashSha256: digest, issuedAt: new Date().toISOString(), expiresAt: new Date(expiry).toISOString(), status: 'active' as const }];
+    const projects = [...this._projects.filter((p) => p.projectId !== projectId), { projectId, grants: structuredClone(grants) }];
+    await this._mutate(this._credentials!, tokens, projects);
+  }
+
+  /** Validate token and, when supplied, enforce the exact alias/host/method/path grant. */
+  async validateToken(token: string, request?: { alias?: string; host?: string; method?: string; path?: string }): Promise<{ projectId: string; grants: ProjectGrant[]; grant?: ProjectGrant }> {
+    this._assertOpen();
+    if (typeof token !== 'string' || token.length < 1 || token.length > 512) throw new VaultError('invalid project token');
+    const supplied = createHash('sha256').update(token, 'utf8').digest();
+    const stored = this._tokens.find((entry) => entry.status === 'active' && entry.tokenHashSha256.length === 64 && timingSafeEqual(Buffer.from(entry.tokenHashSha256, 'hex'), supplied));
+    if (!stored || Date.parse(stored.expiresAt) <= Date.now()) throw new VaultError('invalid or expired project token');
+    const project = this._projects.find((entry) => entry.projectId === stored.projectId);
+    if (!project) throw new VaultError('project grant not found');
+    if (!request) return { projectId: stored.projectId, grants: structuredClone(project.grants) };
+    const grant = project.grants.find((entry) => entry.alias === request.alias && entry.host === request.host && entry.enabled);
+    if (!grant || request.method && !grant.methods?.includes(request.method.toUpperCase()) || request.path && !grant.paths?.some((pattern) => pathMatches(pattern, request.path!))) throw new VaultError('request is outside the project grant');
+    return { projectId: stored.projectId, grants: structuredClone(project.grants), grant: structuredClone(grant) };
+  }
+
+  async revokeToken(projectId: string): Promise<void> {
+    this._assertOpen(); const now = new Date().toISOString();
+    const tokens = this._tokens.map((entry) => entry.projectId === projectId && entry.status === 'active' ? { ...entry, status: 'revoked' as const, revokedAt: now } : entry);
+    if (tokens.every((entry, index) => entry === this._tokens[index])) return;
+    await this._mutate(this._credentials!, tokens, this._projects);
+  }
+
+  async resolveCredential(projectId: string, alias: string): Promise<{ provider: string; secret: string }> {
+    this._assertOpen();
+    const project = this._projects.find((entry) => entry.projectId === projectId);
+    const grant = project?.grants.find((entry) => entry.alias === alias && entry.enabled);
+    if (!grant) throw new VaultError('credential alias is not granted to this project');
+    const credential = this._credentials![alias];
+    if (!credential || credential.provider !== grant.provider) throw new VaultError('granted credential is unavailable');
+    return { ...credential };
   }
 
   async close(): Promise<void> {
-    if (this._closed) return;
-    this._closed = true;
-    this._key?.fill(0);
-    this._salt?.fill(0);
-    this._vaultId?.fill(0);
-    this._key = null;
-    this._credentials = null;
-    this._vaultId = null;
-    this._salt = null;
-    this._kdfParams = null;
+    if (this._closed) return; this._closed = true; this._key?.fill(0); this._salt?.fill(0); this._vaultId?.fill(0);
+    this._key = null; this._credentials = null; this._tokens = []; this._projects = []; this._vaultId = null; this._salt = null; this._kdfParams = null;
   }
 
-  private _nextGeneration(): bigint {
-    if (this._generation === MAX_GENERATION) throw new VaultError('generation overflow');
-    return this._generation + 1n;
+  private async _mutate(credentials: Record<string, Credential>, tokens: StoredToken[], projects: Project[]): Promise<void> {
+    const generation = this._nextGeneration();
+    await this._writeTransaction(credentials, tokens, projects, generation);
+    this._credentials = credentials; this._tokens = tokens; this._projects = projects; this._generation = generation;
   }
-
+  private _nextGeneration(): bigint { if (this._generation === MAX_GENERATION) throw new VaultError('generation overflow'); return this._generation + 1n; }
   private _assertOpen(): void { if (this._closed) throw new VaultLockedError('vault is closed'); }
 
   private async _acquireLock(): Promise<void> {
-    const lockPath = `${this._path}.lock`;
-    const lockData = JSON.stringify({ pid: process.pid, timestamp: Date.now() });
-
-    try {
-      await this._fs.writeFileExclusive(lockPath, lockData);
-      return;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-    }
-
-    // A live POSIX process is authoritative: age alone must never break its lock.
-    // On Windows, where reliable cross-process PID probing is not portable here,
-    // use the documented 10-second age threshold.
+    const lockPath = `${this._path}.lock`; const lockData = JSON.stringify({ pid: process.pid, timestamp: Date.now() });
+    try { await this._fs.writeFileExclusive(lockPath, lockData); return; }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
     let stale = false;
     try {
-      const raw = (await this._fs.readFile(lockPath)).toString('utf8');
-      const current: unknown = JSON.parse(raw);
-      if (!current || typeof current !== 'object' || Array.isArray(current)) {
-        throw new Error('invalid lock record');
-      }
-      const record = current as { pid?: unknown; timestamp?: unknown };
-      if (!Number.isSafeInteger(record.pid) || (record.pid as number) <= 0 ||
-          !Number.isFinite(record.timestamp) || (record.timestamp as number) <= 0) {
-        throw new Error('invalid lock record');
-      }
-      const isOld = Date.now() - (record.timestamp as number) > 10_000;
-
-      if (process.platform === 'win32') {
-        stale = isOld;
-      } else {
-        try {
-          process.kill(record.pid as number, 0);
-          stale = false;
-        } catch (probeError) {
-          const code = (probeError as NodeJS.ErrnoException).code;
-          if (code === 'ESRCH') stale = true;
-          else if (code === 'EPERM') stale = false;
-          else throw probeError;
-        }
-      }
-    } catch {
-      // Unreadable or malformed lock records are hard conflicts, not permission
-      // to remove a lock whose owner cannot be established.
-      stale = false;
-    }
-
-    if (stale) {
-      await this._fs.unlink(lockPath);
-      // Exactly one exclusive retry. If another writer won the race, surface
-      // the conflict rather than attempting repeated lock stealing.
-      try {
-        await this._fs.writeFileExclusive(lockPath, lockData);
-        return;
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
-          throw new VaultConflictError('vault lock was reclaimed by another writer');
-        }
-        throw error;
-      }
-    }
-
-    throw new VaultConflictError(`vault is locked by another process (delete ${lockPath} only if you have confirmed its owner crashed)`);
+      const record = JSON.parse((await this._fs.readFile(lockPath)).toString('utf8')) as { pid?: number; timestamp?: number };
+      if (!Number.isSafeInteger(record.pid) || !Number.isFinite(record.timestamp)) throw new Error('invalid lock');
+      const old = Date.now() - record.timestamp! > 10_000;
+      if (process.platform === 'win32') stale = old;
+      else { try { process.kill(record.pid!, 0); } catch (e) { stale = (e as NodeJS.ErrnoException).code === 'ESRCH'; } }
+    } catch { stale = false; }
+    if (!stale) throw new VaultConflictError('vault is locked by another process');
+    await this._fs.unlink(lockPath);
+    try { await this._fs.writeFileExclusive(lockPath, lockData); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new VaultConflictError('vault lock was reclaimed'); throw error; }
   }
-
   private async _withLock<T>(fn: () => Promise<T>): Promise<T> {
-    this._assertOpen();
-    const lockPath = `${this._path}.lock`;
-    await this._acquireLock();
-    try { return await fn(); }
-    finally { await this._fs.unlink(lockPath).catch(() => undefined); }
+    this._assertOpen(); const lockPath = `${this._path}.lock`; await this._acquireLock();
+    try { return await fn(); } finally { await this._fs.unlink(lockPath).catch(() => undefined); }
   }
-
-  private async _writeTransaction(credentials: Record<string, { provider: string; secret: string }>, generation: bigint): Promise<void> {
+  private async _writeTransaction(credentials: Record<string, Credential>, tokens: StoredToken[], projects: Project[], generation: bigint): Promise<void> {
     await this._withLock(async () => {
-      let current;
-      try { current = parseVault(await this._fs.readFile(this._path)); }
-      catch (error) {
-        if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw new VaultConflictError('vault file no longer exists');
-        throw error;
-      }
+      let current; try { current = parseVault(await this._fs.readFile(this._path)); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw new VaultConflictError('vault file no longer exists'); throw error; }
       if (parseGeneration(current.generation) !== this._generation) throw new VaultConflictError('generation mismatch');
-      await this._writeSnapshot(credentials, generation);
+      await this._writeSnapshot(credentials, tokens, projects, generation);
     });
   }
-
-  private async _writeSnapshot(credentials: Record<string, { provider: string; secret: string }>, generation: bigint): Promise<void> {
+  private async _writeSnapshot(credentials: Record<string, Credential>, tokens: StoredToken[], projects: Project[], generation: bigint): Promise<void> {
     const aad = buildAad({ version: 1, vaultId: this._vaultId!, generation, kdf: { ...this._kdfParams!, salt: this._salt! } });
-    const plaintext = Buffer.from(JSON.stringify({ vaultId: this._vaultId!.toString('base64'), credentials }), 'utf8');
-    let payload;
-    try { payload = encrypt(this._key!, plaintext, aad); }
-    finally { plaintext.fill(0); }
-    const content = serializeVault({
-      magic: 'KEYLESS', version: 1, vaultId: this._vaultId!.toString('base64'), generation: generation.toString(),
-      kdf: { ...this._kdfParams!, salt: this._salt!.toString('base64') },
-      payload: { nonce: payload.nonce.toString('base64'), ciphertext: payload.ciphertext.toString('base64'), tag: payload.tag.toString('base64') },
-    });
+    const plaintext = Buffer.from(JSON.stringify({ vaultId: this._vaultId!.toString('base64'), credentials, tokens, projects }), 'utf8');
+    let payload; try { payload = encrypt(this._key!, plaintext, aad); } finally { plaintext.fill(0); }
+    const content = serializeVault({ magic: 'KEYLESS', version: 1, vaultId: this._vaultId!.toString('base64'), generation: generation.toString(), kdf: { ...this._kdfParams!, salt: this._salt!.toString('base64') }, payload: { nonce: payload.nonce.toString('base64'), ciphertext: payload.ciphertext.toString('base64'), tag: payload.tag.toString('base64') } });
     const tmpPath = `${this._path}.${randomBytes(16).toString('hex')}.tmp`;
-    try {
-      await this._fs.writeFileTmp(tmpPath, content, 0o600);
-      await this._fs.fsyncAndRename(tmpPath, this._path);
-    } catch (error) {
-      await this._fs.unlink(tmpPath).catch(() => undefined);
-      throw error;
-    }
+    try { await this._fs.writeFileTmp(tmpPath, content, 0o600); await this._fs.fsyncAndRename(tmpPath, this._path); }
+    catch (error) { await this._fs.unlink(tmpPath).catch(() => undefined); throw error; }
   }
+}
+
+function pathMatches(pattern: string, path: string): boolean {
+  const p = pattern.split('/'); const v = path.split('/');
+  return p.length === v.length && p.every((segment, index) => segment === '*' || segment === v[index]);
 }
