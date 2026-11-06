@@ -146,7 +146,7 @@ Options:
       host: option(args, '--host', provider === 'openai' ? 'api.openai.com' : 'api.anthropic.com'),
       methods: list(option(args, '--methods', 'POST')),
       paths: list(option(args, '--paths', '/v1/chat/completions')),
-      expiresInDays: Number(option(args, '--expires-days', '30')),
+      expiresInDays: Number(option(args, '--expires-days', '1')),
     };
     const result = await runGrantCommand(input, {
       socketPath: option(args, '--socket', DEFAULT_SOCKET),
@@ -227,6 +227,13 @@ Options:
     await (await import('node:fs/promises')).writeFile(join(DEFAULT_DIR, 'proxy.pid'), `${child.pid}\n`, { mode: 0o600 });
     child.unref();
     process.stdout.write(`Proxy starting on 127.0.0.1:${port}${mock ? ' (mock upstream)' : ''}.\n`);
+    return;
+  }
+  if (command === 'revoke') {
+    const projectId = tail[0];
+    if (!projectId) throw new Error('usage: keyless revoke <projectId>');
+    await ipcRequest(option(args, '--socket', DEFAULT_SOCKET), 'revoke', { projectId });
+    process.stdout.write(`Project token revoked: ${projectId}\n`);
     return;
   }
   if (command === 'lock') {

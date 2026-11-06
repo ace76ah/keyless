@@ -80,7 +80,7 @@ export async function runGrantCommand(
   const socketPath = options.socketPath ?? join(homedir(), '.keyless', 'daemon.sock');
   const projectId = randomUUID();
   const token = `klp_v1_${randomBytes(32).toString('base64url')}`;
-  const expiresInDays = input.expiresInDays ?? 30;
+  const expiresInDays = input.expiresInDays ?? 1;
   if (!Number.isInteger(expiresInDays) || expiresInDays < 1 || expiresInDays > 365) throw new Error('expiry must be 1–365 days');
   const expiresAt = new Date(Date.now() + expiresInDays * 86_400_000).toISOString();
   const grants = [{

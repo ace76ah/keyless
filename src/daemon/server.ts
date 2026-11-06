@@ -34,7 +34,12 @@ export async function startDaemon(options: DaemonOptions): Promise<DaemonHandle>
             if (typeof args.projectId !== 'string' || typeof args.token !== 'string' || typeof args.expiresAt !== 'string' || !Array.isArray(args.grants)) throw new Error('add_token requires projectId, token, expiresAt and grants');
             await vault.addToken(args.projectId, args.token, args.expiresAt, args.grants as Parameters<typeof vault.addToken>[3]);
             return { data: { projectId: args.projectId, added: true } };
-          case 'validate_token': {
+          case 'revoke': {
+      if (typeof args.projectId !== 'string') throw new Error('revoke requires projectId');
+      await vault.revokeToken(args.projectId);
+      return { data: { revoked: args.projectId } };
+    }
+    case 'validate_token': {
             if (typeof args.token !== 'string') throw new Error('validate_token requires token');
             const result = await vault.validateToken(args.token, {
               ...(typeof args.alias === 'string' ? { alias: args.alias } : {}),

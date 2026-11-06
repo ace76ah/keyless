@@ -37,11 +37,47 @@ function reply(res, status, code, message) {
     res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' });
     res.end(JSON.stringify({ error: code, code, message }));
 }
-function safePath(raw) {
-    if (!raw.startsWith('/') || raw.startsWith('//') || /[%\\\0]/.test(raw) || /(^|\/)\.{1,2}(\/|$)/.test(raw))
+function normalizeUpstreamPath(raw) {
+    let decoded;
+    try {
+        decoded = decodeURIComponent(raw);
+    }
+    catch {
         return null;
-    const match = /^\/c\/([a-z][a-z0-9_-]{0,31})(\/.*)?$/.exec(raw);
-    return match ? { alias: match[1], upstreamPath: match[2] || '/' } : null;
+    }
+    if (decoded.includes("\0"))
+        return null;
+    if (/%2f|%5c/i.test(raw))
+        return null;
+    try {
+        const twice = decodeURIComponent(decoded);
+        if (twice !== decoded)
+            return null;
+    }
+    catch {
+        return null;
+    }
+    const segments = decoded.split("/");
+    if (segments.some((seg) => seg === "." || seg === ".."))
+        return null;
+    const collapsed = decoded.replace(/\/+/g, "/");
+    const withLeading = collapsed.startsWith("/") ? collapsed : "/" + collapsed;
+    return withLeading.length > 1 ? withLeading.replace(/\/$/, "") : withLeading;
+}
+function safePath(raw) {
+    if (!raw.startsWith("/"))
+        return null;
+    if (raw.includes("\\"))
+        return null;
+    const match = /^\/c\/([a-z][a-z0-9-]{0,31})(\/.*)?$/.exec(raw);
+    if (!match)
+        return null;
+    const alias = match[1];
+    const rawUpstream = match[2] || "/";
+    const normalized = normalizeUpstreamPath(rawUpstream);
+    if (normalized === null)
+        return null;
+    return { alias, upstreamPath: normalized };
 }
 async function readBody(req, limit) {
     const chunks = [];
@@ -80,7 +116,7 @@ export async function createProxyServer(options) {
             try {
                 await audit(status);
             }
-            catch {
+            catch (err) {
                 return reply(res, 503, 'audit_unavailable', 'Request blocked because audit logging is unavailable.');
             }
             reply(res, status, code, message);
