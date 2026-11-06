@@ -1,16 +1,14 @@
 {
-  "name": "keyless",
+  "name": "keyless-gate1a-stage",
   "version": "0.0.1",
   "private": true,
-  "description": "A local-first credential gateway for AI-assisted development.",
   "type": "module",
-  "engines": {
-    "node": ">=22.9.0"
-  },
+  "engines": { "node": ">=22.14.0" },
   "scripts": {
-    "spike": "node spike/mock-proxy.mjs",
-    "test": "node --test",
-    "check": "node --check spike/mock-proxy.mjs && node --test"
+    "test": "node --experimental-strip-types --test test/*.test.mjs"
   },
-  "author": "Ahmad Hussain"
+  "dependencies": {
+    "@noble/ciphers": "1.0.0",
+    "@noble/hashes": "1.4.0"
+  }
 }

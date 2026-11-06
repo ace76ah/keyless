@@ -1,0 +1,177 @@
+import net, { type AddressInfo, type Socket } from 'node:net';
+import { createHash } from 'node:crypto';
+import { chmod, unlink } from 'node:fs/promises';
+
+export type IpcRequest = {
+  command: string;
+  args?: Record<string, unknown>;
+};
+
+export type IpcHandlerResult = {
+  data: unknown;
+  closeAfterReply?: boolean;
+};
+
+export type IpcHandler = (
+  request: IpcRequest,
+) => Promise<IpcHandlerResult> | IpcHandlerResult;
+
+export type IpcServerOptions = {
+  socketPath: string;
+  handler: IpcHandler;
+  maxLineBytes?: number;
+};
+
+export type IpcServerHandle = {
+  address: string;
+  close(): Promise<void>;
+};
+
+/**
+ * Resolve a stable IPC endpoint. Unix uses the caller-provided socket path;
+ * Windows uses a deterministic named-pipe name derived from that path.
+ */
+export function resolveIpcAddress(socketPath: string, platform = process.platform): string {
+  if (platform !== 'win32') return socketPath;
+  const suffix = createHash('sha256').update(socketPath).digest('hex').slice(0, 24);
+  return `\\\\.\\pipe\\keyless-${suffix}`;
+}
+
+function isRequest(value: unknown): value is IpcRequest {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return typeof record.command === 'string' &&
+    (record.args === undefined ||
+      (typeof record.args === 'object' && record.args !== null && !Array.isArray(record.args)));
+}
+
+function writeJsonLine(socket: Socket, value: unknown): Promise<void> {
+  return new Promise((resolve, reject) => {
+    socket.write(`${JSON.stringify(value)}\n`, (error) => {
+      if (error) reject(error);
+      else resolve();
+    });
+  });
+}
+
+export async function createIpcServer(options: IpcServerOptions): Promise<IpcServerHandle> {
+  const maxLineBytes = options.maxLineBytes ?? 64 * 1024;
+  const address = resolveIpcAddress(options.socketPath);
+  const sockets = new Set<Socket>();
+  let closing: Promise<void> | null = null;
+
+  const server = net.createServer((socket) => {
+    sockets.add(socket);
+    socket.setNoDelay(true);
+    let buffered = Buffer.alloc(0);
+    let queue = Promise.resolve();
+
+    socket.on('close', () => sockets.delete(socket));
+    socket.on('error', () => sockets.delete(socket));
+    socket.on('data', (chunk: Buffer) => {
+      buffered = Buffer.concat([buffered, chunk]);
+      if (buffered.length > maxLineBytes && !buffered.includes(0x0a)) {
+        void writeJsonLine(socket, { ok: false, error: 'request line too large' })
+          .catch(() => undefined)
+          .finally(() => socket.destroy());
+        buffered = Buffer.alloc(0);
+        return;
+      }
+
+      let newline: number;
+      while ((newline = buffered.indexOf(0x0a)) !== -1) {
+        const line = buffered.subarray(0, newline);
+        buffered = buffered.subarray(newline + 1);
+        if (line.length > maxLineBytes) {
+          void writeJsonLine(socket, { ok: false, error: 'request line too large' })
+            .catch(() => undefined)
+            .finally(() => socket.destroy());
+          return;
+        }
+        const requestLine = Buffer.from(line);
+        queue = queue.then(async () => {
+          if (socket.destroyed) return;
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(requestLine.toString('utf8'));
+          } catch {
+            await writeJsonLine(socket, { ok: false, error: 'invalid JSON request' });
+            return;
+          }
+          if (!isRequest(parsed)) {
+            await writeJsonLine(socket, { ok: false, error: 'invalid request' });
+            return;
+          }
+
+          try {
+            const result = await options.handler(parsed);
+            const response = { ok: true, data: result.data };
+            if (result.closeAfterReply) {
+              // Flush the response, then close this connection and the listener.
+              socket.end(`${JSON.stringify(response)}\n`, () => {
+                socket.destroy();
+                void close();
+              });
+            } else {
+              await writeJsonLine(socket, response);
+            }
+          } catch (error) {
+            const message = error instanceof Error ? error.message : 'request failed';
+            await writeJsonLine(socket, { ok: false, error: message });
+          }
+        }).catch(() => socket.destroy());
+      }
+
+      if (buffered.length > maxLineBytes) {
+        void writeJsonLine(socket, { ok: false, error: 'request line too large' })
+          .catch(() => undefined)
+          .finally(() => socket.destroy());
+      }
+    });
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    const onError = (error: Error) => {
+      server.off('listening', onListening);
+      reject(error);
+    };
+    const onListening = () => {
+      server.off('error', onError);
+      resolve();
+    };
+    server.once('error', onError);
+    server.once('listening', onListening);
+    server.listen(address);
+  });
+
+  if (process.platform !== 'win32') {
+    try {
+      await chmod(address, 0o600);
+    } catch (error) {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await unlink(address).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  async function close(): Promise<void> {
+    if (closing) return closing;
+    closing = new Promise<void>((resolve, reject) => {
+      for (const socket of sockets) socket.destroy();
+      server.close((error) => {
+        void (async () => {
+          if (process.platform !== 'win32') {
+            try { await unlink(address); }
+            catch (unlinkError) {
+              if ((unlinkError as NodeJS.ErrnoException).code !== 'ENOENT') throw unlinkError;
+            }
+          }
+          if (error) throw error;
+        })().then(resolve, reject);
+      });
+    });
+    return closing;
+  }
+
+  return { address, close };
+}
