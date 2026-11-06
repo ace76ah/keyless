@@ -18,7 +18,7 @@ Keyless is designed to reduce accidental secret exposure in source files, agent 
 
 ## Status
 
-Keyless is an early `0.1.0` release candidate. The Vault, daemon IPC, project-token/grant validation, local HTTP proxy, CLI grant flow and metadata-only audit log are implemented and have passed the project owner's reported local test suite (53 tests) and end-to-end test. This ZIP is a documentation and packaging update; run the checks below against your checkout before publishing.
+Keyless is an early `0.1.0` release candidate. The Vault, daemon IPC, project-token/grant validation, local HTTP proxy, CLI grant flow and metadata-only audit log are implemented and have passed the project owner's reported local test suite (53 tests) and end-to-end test. 
 
 The current implementation is intentionally narrower than the full design documents in some areas:
 
