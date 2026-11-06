@@ -1,135 +1,88 @@
 # Keyless threat model
 
-**Status: Gate 0 design draft — requires external human security review before production implementation.**
+**Status: Gate 1 implementation state. This document describes implemented components and known limitations; it is not an independent security certification.**
 
-This document defines the security claims Keyless may make and the claims it must not make. The threat model is intentionally narrow: Keyless reduces accidental credential exposure and limits approved credential use. It does not sandbox an agent or isolate hostile code running as the same user.
+Keyless reduces accidental credential exposure and limits ordinary agent requests to permissions stored in a local encrypted vault. It does not sandbox an agent or isolate hostile code running as the same operating-system user.
 
 ## 1. Security objective
 
-Keyless keeps provider credentials out of ordinary agent configuration, source files, chat context, command output and routine logs. A local daemon stores the vault, checks project grants, and attaches the provider credential only when it forwards an approved request.
+Provider credentials are stored in an encrypted local vault rather than ordinary project configuration, source files or agent context. During a normal proxied request, the local proxy authenticates a Keyless project token through the daemon, obtains the credential associated with an approved alias, removes caller-supplied authentication and injects the provider credential before forwarding.
 
-The product objective is **reduce accidental exposure and limit blast radius**, not prevent every possible use of a credential by software running with the developer's OS privileges.
+The objective is **reduce accidental exposure and constrain normal credential use**, not prevent every possible use of credentials by software with the developer's OS privileges.
 
 ## 2. Assets
 
-- Provider credentials stored in the encrypted vault.
-- Master passphrase and derived vault keys.
-- Project capability tokens and token lifecycle metadata.
-- Vault-held grants: provider, host, methods, paths, model/query allowlists and transport caps.
-- Approval records and audit metadata.
-- Integrity of the vault and daemon state.
+- Provider credentials in the encrypted vault and daemon memory.
+- Vault passphrase-derived key material.
+- Project tokens and their SHA-256 digests.
+- Project IDs and vault-held grants.
+- Audit events and the audit integrity checkpoint.
+- Integrity and availability of the vault, daemon IPC endpoint and proxy.
 
-## 3. Trust boundaries and principal components
+## 3. Implemented components and trust boundaries
 
-1. **Developer / human:** owns the machine, approves grant changes and unlocks the vault.
-2. **CLI:** obtains passphrases through a hidden terminal prompt; asks the daemon to create credentials, grants and project tokens.
-3. **Daemon:** sole owner of the unlocked vault, decrypted credentials, session state, token validation, authoritative grants and proxy listener.
-4. **Project / agent process:** local code that may know the base URL and read the project-token file. It does not receive provider credentials as part of the normal request flow.
-5. **Provider endpoint:** fixed origin shipped in the Keyless package. The client never chooses the upstream host.
-6. **OS security services:** protect user files and provide approval prompts where available.
+1. **Developer / human:** initializes and unlocks the vault, enters provider credentials and confirms grants in the terminal.
+2. **CLI:** prompts for passphrases and secrets, manages vault operations, creates project grants through daemon IPC, starts/stops daemon and proxy processes, and verifies audit logs.
+3. **Encrypted vault:** stores provider credentials, project token digests, project records and grants in the encrypted v1 JSON envelope.
+4. **Daemon:** opens the vault, retains unlocked state, validates project tokens and grant constraints, resolves credentials, and appends audit events.
+5. **Local HTTP proxy:** binds to `127.0.0.1`, accepts `/c/<alias>/...` requests, validates bearer project tokens through daemon IPC, resolves the approved credential, strips caller authentication headers and forwards to the provider origin configured for the alias.
+6. **Audit log:** records request metadata in an append-only NDJSON file with a SHA-256 hash chain and a local `.head` checkpoint.
+7. **Provider endpoint:** built-in provider mapping determines the upstream host; the incoming request does not select an arbitrary upstream hostname.
 
-The project configuration file is untrusted input. It is a request, not an authorization record. The daemon compares it with the vault-held grant and refuses unapproved expansion.
+The project token is a local capability. It is not the provider API credential, and the proxy should never forward it upstream.
 
-## 4. In scope: what Keyless aims to defend against
+## 4. Implemented controls
 
-- Accidental pasting of provider keys into agent chats, source code, .env files or normal terminal output.
-- An agent modifying a project request file to silently expand its own permissions.
-- A request attempting to use a credential against a host, method, path, query parameter or model outside the vault-held grant.
-- A request attempting to override the provider host or supply an absolute URL.
-- SSRF, DNS rebinding and redirects intended to send provider credentials to an unapproved destination.
-- Caller-supplied authentication headers attempting to override Keyless provider credentials.
-- Header injection, request framing abuse, oversized requests, slow clients and uncontrolled concurrency.
-- A locked, expired or revoked state causing an agent to hang or retry indefinitely.
-- Accidental credential exposure through ordinary logs, normalized errors or audit records.
+- Vault encryption uses XChaCha20-Poly1305 with Argon2id-derived key material. Current defaults are `m=65536` KiB, `t=3`, `p=4`; see [vault-format.md](vault-format.md). These remain working defaults pending recorded benchmarking.
+- Vault envelope metadata is authenticated as associated data; generation checks and write locking protect against stale concurrent writes.
+- Project tokens are stored as SHA-256 digests and checked for validity/expiry/revocation by the vault.
+- Grants are stored in the encrypted vault and checked for alias, host, method and path on the proxy request path.
+- The proxy strips caller-provided authentication headers and inserts the provider credential resolved by the daemon.
+- Audit events contain timestamp, project ID, alias, method, host, path, status and duration. Bodies, headers and secret values are not part of the audit event schema.
+- The audit log verifies its SHA-256 chain and compares it with a checkpoint stored beside the log.
+- The daemon IPC uses a local Unix-domain socket on POSIX and a named-pipe address on Windows. POSIX socket permissions are set to `0600`.
 
-## 5. Out of scope: what Keyless does not defend against
+## 5. Out of scope
 
-- **Arbitrary code execution as the same OS user.** Such a process can read the project-token file, call the loopback proxy, inspect accessible files, attach a debugger where the OS allows it and inspect unlocked process memory. Per-project tokens and grants limit accidental cross-project use; they do not stop a malicious same-user process.
-- Root/administrator access, a compromised kernel, firmware malware or a compromised machine.
-- Malicious dependencies intentionally running with the user's privileges.
-- Prompt injection that fully controls the developer's interactive terminal or can manipulate the human into approving a request.
-- Provider-side data handling, model behavior, service compromise or what an authorized provider request returns.
-- Preventing an authorized application from sending sensitive user data in its request body.
-- Protecting secrets after a user deliberately reveals/copies them into an agent-controlled terminal or clipboard.
-- Remote development environments, hosted coding agents, Docker/dev containers and network clients that cannot reach the same-machine loopback service in v1.
-- IDE-hosted inference traffic that does not expose an officially supported custom endpoint. Keyless does not use packet interception, TLS interception or a system proxy to reroute it.
+- **Arbitrary code execution as the same OS user.** A malicious same-user process may read project tokens, call the loopback proxy, inspect accessible files, or inspect daemon process memory. Grants reduce accidental cross-project access; they do not isolate a hostile process running with the same user privileges.
+- Root/administrator access, kernel/firmware compromise or a compromised machine.
+- Malicious dependencies intentionally executing with the user's privileges.
+- Prompt injection or social engineering that persuades a human to approve an unsafe grant.
+- Provider-side data handling, provider compromise or sensitive data intentionally included in an authorized request body.
+- Preventing a user from deliberately copying a provider credential into an agent-controlled terminal, file or clipboard.
+- Remote/hosted agents and container/network setups that cannot reach the host's loopback proxy.
+- IDE-hosted inference traffic that does not expose a supported custom API endpoint. Keyless does not intercept system traffic or perform TLS interception.
 
-## 6. Project identity, tokens and grants
+## 6. Approval and grant limitations
 
-### Project identity
+Grant creation currently displays a normalized permission diff and requires the user to type `yes` in the terminal. A SHA-256 hash is recorded with the approval metadata to bind the record to the displayed diff.
 
-- Each project receives a random 128-bit project ID during `keyless init`.
-- The daemon canonicalizes the project root using the OS real-path API and computes a SHA-256 path binding. The raw path is stored only inside the encrypted vault where needed; schemas and audit output use the project ID or path digest.
-- A copied project directory does not automatically inherit the original project's authority. A path mismatch requires a new project registration and grant review.
-- Symlinks are resolved before project identity is calculated. A project moved or renamed must be re-registered.
+This is not an OS-level authentication prompt. There is no macOS LocalAuthentication, Windows Hello or polkit integration, and no daemon-issued short-lived one-time challenge with challenge consumption. A process controlling the user's terminal may be able to influence or automate this interaction. Do not claim strong human-presence verification or replay-proof approval.
 
-### Project capability token
+## 7. Audit limitations
 
-- Generated from 32 bytes of OS CSPRNG entropy; encoded as `klp_v1_<base64url>`.
-- Issued only after an approved grant exists.
-- Stored in a user-owned Keyless state directory outside the repository. On POSIX, directory mode 0700 and file mode 0600; Windows uses an owner-only DACL.
-- The vault stores the token ID and SHA-256 digest, not the plaintext token.
-- Sent to the local proxy as `Authorization: Bearer <project-token>`. The daemon validates it before policy evaluation and never forwards it upstream.
-- Default expiry is 30 days. Revocation is immediate at the daemon's next authorization check.
-- A token is a local capability. Because the agent commonly runs as the same OS user, the agent may be able to read it. Treat it as scoped and revocable, not invisible or unstealable.
+The audit writer records metadata only: timestamp, project ID, alias, method, host, path, status and duration. It must not record request/response bodies, headers, provider credentials or project-token values.
 
-### Authoritative permissions
+The SHA-256 chain detects altered, reordered or deleted lines when the `.head` checkpoint remains intact. The checkpoint is stored beside the log, not in an external trust domain. An attacker able to rewrite both files can reconstruct a consistent chain. Automatic log rotation is not implemented.
 
-- `keyless.config.json` states the access the project requests.
-- The grant stored in the encrypted vault is authoritative.
-- The daemon matches project ID, alias, provider, host, method, normalized path, query parameter names, model and transport caps against the authoritative grant on every request.
-- A wider request file has no effect until a human approves the exact normalized diff through `keyless grant`.
-- Project tokens cannot create grants or widen their own authority.
+## 8. Platform limitations
 
-## 7. Daemon session and secret handling
+- macOS/Linux are the tested development targets.
+- Windows named-pipe and ACL behavior is currently untested. Windows should not be described as a validated supported security platform.
+- JavaScript key and plaintext buffer clearing is best-effort. Runtime copies, garbage collection and same-user memory inspection remain outside the guarantee.
+- No OS-level approval UI is implemented.
 
-- One daemon owns the decrypted vault and proxy listener. CLI clients use a local Unix-domain socket on macOS/Linux and a named pipe on Windows, protected by OS ACLs and peer identity checks.
-- Unlock session default is eight hours. Inactivity locking is off by default in v1; explicit `keyless lock` invalidates session state.
-- A locked vault fails fast with HTTP 423 `vault_locked`; the proxy does not wait for an unlock.
-- Re-unlock does not require restarting the agent.
-- Plaintext provider credentials remain in daemon memory only while the vault is unlocked. The JavaScript runtime cannot guarantee perfect zeroization or prevent same-user memory inspection. A native secure-memory implementation is not a v1 claim.
-- Disable production inspector/heap-snapshot entry points and core dumps where supported, but document these as defense-in-depth, not a guarantee of memory isolation.
-- No credential values, project-token contents, request bodies or raw upstream error payloads are logged.
+## 9. Release considerations
 
-## 8. Network request security
+The project owner reports that the Gate 1 end-to-end flow and 53-test suite passed locally. This is useful implementation evidence, not a substitute for independent security review.
 
-The detailed algorithm is in [network.md](network.md). The required high-level sequence is:
+Before production use, independently review:
+- vault parsing, KDF bounds, crypto provider usage and key lifecycle;
+- cross-process locking, atomic writes and crash recovery;
+- IPC peer access and daemon lifecycle;
+- token/grant validation and path normalization;
+- proxy DNS/TLS/redirect/header behavior;
+- audit event provenance, integrity checkpoint and failure handling;
+- grant approval UX and replay resistance.
 
-1. Parse an origin-form HTTP request only. Reject absolute-form targets, authority overrides and unexpected host headers.
-2. Extract the alias only from the /c/<alias>/ path prefix. Resolve the provider from the package's built-in registry; never accept a caller-supplied upstream hostname.
-3. Normalize the path exactly once. Reject encoded separators, NUL, backslashes, repeated separators and dot segments before grant matching.
-4. Check the project token, vault unlock state and authoritative grant before reading or forwarding a body.
-5. Validate method, pathname, query parameters and model against provider and grant allowlists.
-6. Resolve the fixed provider hostname, reject non-public IP ranges and connect to a validated/pinned address with TLS SNI and certificate verification bound to the original hostname.
-7. Strip caller auth/forwarding/cookie/host headers; add only the provider credential from the vault.
-8. Disable redirects, bound sizes/timeouts/concurrency, and propagate client cancellation.
-9. Forward SSE incrementally with backpressure. Normalize mid-stream provider errors without exposing secrets.
-10. Record metadata-only audit entries.
-
-The listener binds only to loopback. Non-null browser Origin values are rejected. Host and Origin checks are defense-in-depth; neither is authentication.
-
-## 9. Human approval
-
-Grant expansions, destructive credential operations and reveal actions require an interactive human approval path described in [approval.md](approval.md).
-
-- The approval UI shows the exact before/after grant, including hosts, methods, paths, queries, models and caps.
-- The approved diff is canonicalized and SHA-256 hashed. The hash is tied to project ID, request digest, current grant revision and a short-lived challenge nonce; it is stored with the grant and audit event.
-- If the request changes between preview and confirmation, approval is discarded and a new diff is shown.
-- macOS uses LocalAuthentication where available; Windows uses Windows Hello; Linux uses a polkit authentication agent where configured. Caller-terminal fallback is weaker and is not proof of human presence.
-- Headless/CI grant expansion and reveal are unsupported in v1.
-
-## 10. Known limitations and v1 platform decisions
-
-- **IDE interception:** out of scope. The owner observed Cursor Free-tier custom endpoint calls returning a subscription paywall error; built-in Cursor models bypassed the custom base URL and used Cursor's cloud route. GitHub Copilot was not tested and is not a v1 target. These are scope decisions, not claims about every IDE plan.
-- **Docker/dev containers:** not supported in v1. The agent and daemon must run on the same host and use host loopback.
-- **Remote development / SSH / hosted agents:** not supported in v1 because remote processes cannot use a developer machine's loopback endpoint as if it were local.
-- **Windows:** intended v1 support using named pipes, owner-only ACLs and Windows Hello; it requires platform-specific implementation and tests.
-- **Sleep/logout:** the daemon must lock on user logout. V1 session behavior across sleep is a known risk; the implementation must decide whether to lock on suspend and document it before release.
-- **In-flight request during lock:** stop admitting new work immediately; abort existing requests and streams within a bounded five-second grace period.
-- **Same-user approval:** even biometric or OS-native prompts do not make the local agent a separate OS principal. A fully controlling agent may interact with a fallback terminal prompt or ask the user to approve something misleading.
-
-## 11. Security review and release gate
-
-An external human security reviewer must review and sign off on this document, [approval.md](approval.md), [protocol.md](protocol.md) and [network.md](network.md) before v1 release. Passing automated tests is not a substitute for that review.
-
-Do not ship v1 if pinned-IP networking cannot preserve normal TLS hostname verification, if an agent loops on `vault_locked`, or if no qualified reviewer signs off on the security boundary.
+Do not claim that Keyless prevents same-user malicious code from using credentials. Its security promise is narrower: keep provider secrets out of ordinary agent configuration and constrain the normal request flow through a local vault-backed gateway.

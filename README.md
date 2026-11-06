@@ -7,125 +7,189 @@
 **Give your AI the keys. Never give it the secrets.**
 
 <p align="center">
-  <img src="assets/keyless-logo.jpg" alt="Keyless infinity-key emblem" width="112">
+  <img src="assets/keyless-logo.jpg" alt="Keyless logo" width="112">
 </p>
 
-I got tired of copying API keys into projects and then wondering where they would end up. Keyless is my attempt at making that part of building software less messy.
+Keyless is a local-first credential gateway for AI-assisted development. Provider credentials stay in an encrypted vault. A local proxy validates a scoped project token, asks the daemon to resolve the approved credential, removes caller-supplied authentication, and injects the provider credential before forwarding the request.
 
-The idea is to keep credentials in a local encrypted vault and let tools use approved credentials through a small local service. The service, not the agent, attaches the real credential when a request is sent to a provider.
+Keyless is designed to reduce accidental secret exposure in source files, agent configuration and routine request flows. It is not a security sandbox.
 
-There is an important limit to that promise: a process running as the same operating-system user may still be able to use the local service, inspect files it can access, or read process memory. Keyless is meant to reduce accidental exposure and limit the blast radius. It is not a sandbox for a fully compromised machine or a malicious process running as you.
+> **Important threat-model limit:** arbitrary code running as the same operating-system user may be able to read project tokens, call the local proxy, inspect accessible files, or inspect process memory. Keyless does not protect against malicious same-user code, administrator/root access, or a compromised machine.
 
-## Where this repo is right now
+## Status
 
-**Status: Gate 0 — protocol contract.**
+Keyless is an early `0.1.0` release candidate. The Vault, daemon IPC, project-token/grant validation, local HTTP proxy, CLI grant flow and metadata-only audit log are implemented and have passed the project owner's reported local test suite (53 tests) and end-to-end test. This ZIP is a documentation and packaging update; run the checks below against your checkout before publishing.
 
-Gate -1 is complete. The local mock's path-based base-URL routing was validated by the owner with:
+The current implementation is intentionally narrower than the full design documents in some areas:
 
-- **OpenAI Node SDK v4** — custom `baseURL` worked and the SDK accepted the canned response.
-- **Anthropic Node SDK** — custom `baseURL` worked and the SDK accepted the canned response.
-- **Aider CLI** — routed an OpenAI-compatible request to the mock and displayed the response.
+- Interactive grant approval is a terminal `yes` confirmation. It is **not** backed by macOS LocalAuthentication, Windows Hello or polkit, and the approval hash is not a daemon-issued one-time challenge.
+- The audit log uses a SHA-256 chain and a local checkpoint file. This detects modification/deletion of the log when the checkpoint remains intact; it is not tamper-proof against an attacker who can rewrite both files.
+- The proxy currently supports the built-in OpenAI and Anthropic aliases. Review the source and grant constraints before using it with sensitive workloads.
+- Windows named-pipe behavior and Windows file permissions have not been validated; Windows support is untested.
+- An external security review is still recommended before production use.
 
-The selected alias format is the URL path prefix:
+## Requirements
 
-```
-http://127.0.0.1:<port>/c/<alias>/...
-```
+- Node.js **22.14.0 or newer**.
+- macOS/Linux is the tested target. Windows is currently untested.
+- A provider API credential for each provider alias you intend to use.
 
-See [the spike notes](docs/spike-notes.md) for the tested versions, the Cursor findings and the remaining limitations.
+## Installation
 
-## V1 integration scope
-
-Keyless v1 targets **direct SDK integrations** and **CLI coding agents** that can be configured to use a custom API base URL. OpenAI Node SDK, Anthropic Node SDK and Aider have passed the mock compatibility test. Claude Code and other CLI agents remain untested.
-
-IDE-hosted agent interception is out of scope for v1. In the owner's Cursor Free-tier test, the custom OpenAI API toggle could be enabled, but requests returned a **Cursor Subscription Required** paywall error. When a built-in Cursor model such as Grok or Composer was selected, the request bypassed the custom base URL and went through Cursor's own cloud service instead. This is the observed behavior in the tested setup, not a claim about every plan or IDE.
-
-GitHub Copilot is also outside the v1 integration scope; it was not tested in this spike. System-level packet interception is a non-goal. Keyless will not attempt to capture or reroute traffic from IDEs that do not expose a supported custom endpoint.
-
-These tests validate base-URL routing and mock response compatibility. They do **not** validate the production Keyless project-token header, credential injection, vault behavior, or production security.
-
-## The mock
-
-The mock server remains deliberately small. It:
-
-- accepts a fake `openai` or `anthropic` credential alias;
-- supports both path and header aliases so the two carriers can be compared;
-- returns canned provider-shaped responses, including a small SSE demo;
-- binds to `127.0.0.1` by default;
-- does not store, decrypt, attach, or forward credentials;
-- does not make requests to OpenAI, Anthropic, or any other upstream service.
-
-**Do not put a real API key in this spike.** The sample SDK scripts use obviously fake placeholders. The mock ignores them.
-
-## Run it
-
-Node.js 22.9 or newer is required.
+After the package is published to npm:
 
 ```bash
-npm run spike
+npm install -g keyless
 ```
 
-The mock listens on `http://127.0.0.1:8787` by default. Change the port with `KEYLESS_SPIKE_PORT`.
-
-In another terminal:
+Then verify:
 
 ```bash
-curl http://127.0.0.1:8787/health
+keyless
 ```
 
-Try the preferred path alias:
+For development from a checkout:
 
 ```bash
-curl -i http://127.0.0.1:8787/c/openai/v1/responses \
-  -H 'content-type: application/json' \
-  -H 'authorization: Bearer not-a-real-key' \
-  -d '{"model":"gpt-4.1-mini","input":"hello from the local spike"}'
+git clone https://github.com/ace76ah/keyless.git
+cd keyless
+npm install
+npm link
 ```
 
-The header alias is still available for comparison:
+If the npm package name is unavailable or the package has not yet been published, install from the repository checkout using the development instructions above.
+
+## Quickstart
+
+The examples use OpenAI. Keep your real provider key out of project files and agent prompts.
+
+### 1. Create the encrypted vault
 
 ```bash
-curl -i http://127.0.0.1:8787/v1/messages \
-  -H 'content-type: application/json' \
-  -H 'x-keyless-credential: anthropic' \
-  -H 'x-api-key: not-a-real-key' \
-  -d '{"model":"claude-test","max_tokens":20,"messages":[{"role":"user","content":"hello"}]}'
+keyless init
 ```
 
-Both examples return mock data. They do not call a provider.
+Enter a strong vault passphrase at the hidden terminal prompt. The default vault is `~/.keyless/vault.json`.
 
-## Run the checks
+### 2. Add your provider credential
 
 ```bash
+keyless add openai --provider openai
+```
+
+Paste the provider credential at the hidden prompt. The default alias is `openai`.
+
+### 3. Start the daemon
+
+```bash
+keyless daemon start
+```
+
+The daemon unlocks the vault and listens on the local IPC endpoint. Keep it running while using the proxy.
+
+### 4. Create an approved project grant
+
+```bash
+keyless grant openai \
+  --provider openai \
+  --methods POST \
+  --paths /v1/chat/completions
+```
+
+Review the displayed alias, host, methods and paths. Type exactly `yes` to approve. The CLI prints the project token once. Store it outside your repository and do not paste it into an agent conversation.
+
+The current CLI's grant command communicates with the daemon, so start the daemon before running `keyless grant`.
+
+### 5. Start the local proxy
+
+```bash
+keyless proxy start --port 8787
+```
+
+The proxy binds to `127.0.0.1`. The provider route is path-based:
+
+```text
+http://127.0.0.1:8787/c/openai/v1
+```
+
+The incoming `Authorization: Bearer <project-token>` is validated locally. The proxy removes caller authentication headers and injects the OpenAI credential resolved from the vault. The project token is not sent to OpenAI.
+
+### 6. Point an SDK or CLI agent at Keyless
+
+For the OpenAI Node SDK, use the project token as the SDK's API key and Keyless as its base URL:
+
+```js
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  apiKey: process.env.KEYLESS_PROJECT_TOKEN,
+  baseURL: "http://127.0.0.1:8787/c/openai/v1",
+});
+```
+
+For an OpenAI-compatible Aider setup, set the project token as the API key presented to the local proxy:
+
+```bash
+export OPENAI_API_BASE="http://127.0.0.1:8787/c/openai/v1"
+export OPENAI_API_KEY="$KEYLESS_PROJECT_TOKEN"
+aider
+```
+
+Do not set `OPENAI_API_KEY` to your real provider secret when routing through Keyless. It should contain the Keyless project token. The daemon injects the actual provider credential.
+
+For Anthropic-compatible clients, use the `/c/anthropic` base URL and configure the Keyless project token in the `Authorization: Bearer` header as supported by that client. SDK-specific header behavior should be tested with the exact SDK version in use.
+
+### 7. Check status, inspect audit events and lock
+
+```bash
+keyless daemon status
+keyless log
+keyless lock
+```
+
+`keyless lock` closes the unlocked vault session and stops the daemon. Start the daemon again when you need another session.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    A["Developer tool / SDK"] -->|"HTTP + project token"| P["Loopback Proxy<br/>127.0.0.1"]
+    P -->|"validate token / resolve credential"| D["Daemon<br/>IPC"]
+    D -->|"decrypt + enforce grants"| V[("Encrypted Vault")]
+    D -->|"append metadata event"| L[("Audit Log<br/>SHA-256 chain")]
+    P -->|"approved request + provider credential"| U["Provider API"]
+```
+
+- **Vault:** encrypted credential, project-token digest and grant storage.
+- **Daemon:** owns the unlocked vault and handles IPC operations.
+- **Proxy:** validates project authorization through the daemon, strips caller credentials and forwards to a built-in provider origin.
+- **Audit log:** records request metadata, not bodies, headers or secrets.
+
+## Audit and privacy
+
+The audit log is stored at `~/.keyless/audit.log`; its integrity checkpoint is stored alongside it. Logged request fields include timestamp, project ID, alias, method, host, path, status and duration. Request bodies, headers, provider secrets and project-token values must not be recorded.
+
+The local checkpoint is not an external trust anchor. An attacker able to alter both the log and checkpoint can reconstruct the chain. There is no automatic log rotation in this release.
+
+## Development and tests
+
+```bash
+npm install
 npm test
-npm run check
+bash scripts/e2e-test.sh
 ```
 
-## Gate 0: design specifications
+The E2E script uses a mocked upstream and should not make real provider API calls. Do not treat passing tests as a substitute for a security review.
 
-The first Gate 0 specifications are now in the repository:
+## Documentation
 
-- [HTTP protocol](docs/protocol.md) — routes, project token, errors, streaming and cancellation.
-- [Agent UX](docs/agent-ux.md) — exact `keyless use` output, token-file handling and SDK/CLI setup.
-- [V1 scope](docs/scope.md) — supported integrations, commands and non-goals.
-- [Threat model](docs/threat-model.md) — security objectives, trust boundaries and limitations.
-- [Vault format](docs/vault-format.md) — encrypted container, Argon2id bounds, AEAD and atomic writes.
-- [Approval flow](docs/approval.md) — per-OS approval, grant diff binding and reveal.
-- [Network rules](docs/network.md) — path normalization, pinned DNS/TLS, headers and redirects.
-- [JSON schemas](schemas/) — project request, vault-held grant and built-in provider definitions.
+- [Threat model](docs/threat-model.md)
+- [Vault format](docs/vault-format.md)
+- [Protocol notes](docs/protocol.md)
+- [Network rules](docs/network.md)
+- [Approval design](docs/approval.md)
+- [Open issues](OPEN-ISSUES.md)
 
-See the [Gate 0 project-token validation plan](docs/gate0-test-plan.md) and executable reference contract harness in `test/project-token-contract.test.mjs`. The harness is a protocol fixture, not production authentication or proof of SDK compatibility.
+## Security reports
 
-These are Gate 0 design drafts, not implemented features. Project-token delivery, SDK header precedence, token revocation, OS approval and pinned-IP TLS still require implementation tests and an external human security review.
-
-## What is not built yet
-
-No encrypted vault, credential storage, grant system, human approval, daemon, production network client, or real upstream forwarding is included in this spike. IDE-agent interception and system-level packet interception are also out of scope for v1.
-
-See the [Gate -1 runbook](docs/spike-runbook.md), [spike notes](docs/spike-notes.md) and [current decisions](DECISIONS.md).
-
-## Support
-
-For project support, email [contact@aahmedhussa.in](mailto:contact@aahmedhussa.in).
-
-This is an early experiment. I would rather find out that the workflow needs changing now than build a lot of infrastructure around the wrong interface.
+Please use GitHub's private vulnerability reporting feature if enabled for this repository. Do not publish unpatched vulnerability details in public issues. General project support: [contact@aahmedhussa.in](mailto:contact@aahmedhussa.in).

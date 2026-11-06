@@ -1,7 +1,7 @@
 {
-  "name": "keyless-gate1a-stage",
-  "version": "0.0.1",
-  "private": true,
+  "name": "keyless",
+  "version": "0.1.0",
+  "private": false,
   "type": "module",
   "engines": {
     "node": ">=22.14.0"
