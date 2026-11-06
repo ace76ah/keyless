@@ -189,6 +189,22 @@ Options:
     return;
   }
   if (command === 'proxy' && action === 'start') {
+    // Refuse to spawn a duplicate proxy if the port is already bound.
+    {
+      const probe = await import('node:net');
+      const inUse = await new Promise<boolean>((resolve) => {
+        const srv = probe.createServer();
+        srv.once('error', (err: any) => {
+          resolve(err && err.code === 'EADDRINUSE');
+        });
+        srv.once('listening', () => srv.close(() => resolve(false)));
+        srv.listen(Number(option(args, '--port', '8787')), '127.0.0.1');
+      });
+      if (inUse) {
+        process.stdout.write(`Proxy already running on 127.0.0.1:${option(args, '--port', '8787')}\n`);
+        return;
+      }
+    }
     const socketPath = option(args, '--socket', DEFAULT_SOCKET);
     const port = Number(option(args, '--port', '8787'));
     const mock = has(args, '--mock-upstream');
@@ -214,6 +230,16 @@ Options:
     return;
   }
   if (command === 'lock') {
+    // Stop the proxy first, then lock the vault.
+    try {
+      const fsmod = await import('node:fs/promises');
+      const pidRaw = await fsmod.readFile(join(DEFAULT_DIR, 'proxy.pid'), 'utf8');
+      const pid = Number(pidRaw.trim());
+      if (pid > 0) {
+        try { process.kill(pid, 'SIGTERM'); } catch { /* already dead */ }
+      }
+      await fsmod.unlink(join(DEFAULT_DIR, 'proxy.pid')).catch(() => {});
+    } catch { /* no proxy was running */ }
     await ipcRequest(option(args, '--socket', DEFAULT_SOCKET), 'lock');
     process.stdout.write('Vault locked.\n');
     return;
