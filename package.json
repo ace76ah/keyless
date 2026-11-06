@@ -3,9 +3,15 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=22.14.0" },
+  "engines": {
+    "node": ">=22.14.0"
+  },
+  "bin": {
+    "keyless": "./bin/keyless.mjs"
+  },
   "scripts": {
-    "test": "node --experimental-strip-types --test test/*.test.mjs"
+    "test": "node --experimental-strip-types --test test/*.test.mjs",
+    "e2e": "bash scripts/e2e-test.sh"
   },
   "dependencies": {
     "@noble/ciphers": "1.0.0",
