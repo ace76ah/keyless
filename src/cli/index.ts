@@ -174,7 +174,7 @@ Options:
     const vaultPath = option(args, '--vault', DEFAULT_VAULT);
     const auditPath = option(args, '--audit', DEFAULT_AUDIT);
     const passphrase = await getPassphrase();
-    const child = spawn(process.execPath, ['--experimental-strip-types', join(REPO_ROOT, 'src/daemon/server.ts'), '--vault', vaultPath, '--socket', socketPath, '--audit', auditPath], {
+    const child = spawn(process.execPath, [join(REPO_ROOT, 'dist/daemon/server.js'), '--vault', vaultPath, '--socket', socketPath, '--audit', auditPath], {
       detached: true, stdio: ['pipe', 'ignore', 'inherit'],
     });
     child.stdin?.end(`${passphrase}\n`);
@@ -192,7 +192,7 @@ Options:
     const socketPath = option(args, '--socket', DEFAULT_SOCKET);
     const port = Number(option(args, '--port', '8787'));
     const mock = has(args, '--mock-upstream');
-    const moduleUrl = new URL('../proxy/server.ts', import.meta.url).href;
+    const moduleUrl = new URL('../proxy/server.js', import.meta.url).href;
     const source = `
       import { createProxyServer } from ${JSON.stringify(moduleUrl)};
       const mock = ${mock};
@@ -206,7 +206,7 @@ Options:
       const stop = async () => { await handle.close(); process.exit(0); };
       process.on('SIGTERM', stop); process.on('SIGINT', stop);
     `;
-    const child = spawn(process.execPath, ['--experimental-strip-types', '--input-type=module', '-e', source], { detached: true, stdio: ['ignore', 'ignore', 'inherit'] });
+    const child = spawn(process.execPath, ['--input-type=module', '-e', source], { detached: true, stdio: ['ignore', 'ignore', 'inherit'] });
     await new Promise<void>((done, reject) => { child.once('spawn', () => done()); child.once('error', reject); });
     await (await import('node:fs/promises')).writeFile(join(DEFAULT_DIR, 'proxy.pid'), `${child.pid}\n`, { mode: 0o600 });
     child.unref();
